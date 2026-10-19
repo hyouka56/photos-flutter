@@ -65,7 +65,7 @@ def main() -> None:
                 raise SystemExit("Could not find exactly one defaultConfig block in build.gradle.kts")
             gradle_text = gradle_text.replace(
                 marker,
-                marker + '\\n        ndk {\\n            abiFilters += listOf("arm64-v8a")\\n        }',
+                marker + chr(10) + "        ndk {" + chr(10) + '            abiFilters += listOf("arm64-v8a")' + chr(10) + "        }",
                 1,
             )
         if 'abiFilters += listOf("arm64-v8a")' not in gradle_text:
@@ -80,7 +80,7 @@ def main() -> None:
                 raise SystemExit("Could not find exactly one defaultConfig block in build.gradle")
             gradle_text = gradle_text.replace(
                 marker,
-                marker + '\\n        ndk {\\n            abiFilters "arm64-v8a"\\n        }',
+                marker + chr(10) + "        ndk {" + chr(10) + '            abiFilters "arm64-v8a"' + chr(10) + "        }",
                 1,
             )
         if 'abiFilters "arm64-v8a"' not in gradle_text:
