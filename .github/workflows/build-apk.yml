@@ -50,6 +50,14 @@ jobs:
           set -euo pipefail
           grep -q 'android:label="Photos"' android/app/src/main/AndroidManifest.xml
           grep -q 'android:icon="@drawable/photos_icon"' android/app/src/main/AndroidManifest.xml
+          if [ -f android/app/build.gradle.kts ]; then
+            grep -q 'abiFilters += listOf("arm64-v8a")' android/app/build.gradle.kts
+          elif [ -f android/app/build.gradle ]; then
+            grep -q 'abiFilters "arm64-v8a"' android/app/build.gradle
+          else
+            echo 'Android Gradle file not found.'
+            exit 1
+          fi
           grep -q 'android.permission.READ_MEDIA_IMAGES' android/app/src/main/AndroidManifest.xml
           grep -q 'android.permission.READ_MEDIA_VISUAL_USER_SELECTED' android/app/src/main/AndroidManifest.xml
           test -f android/app/src/main/res/drawable/photos_icon.xml

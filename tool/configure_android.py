@@ -23,6 +23,8 @@ def main() -> None:
     root = Path(__file__).resolve().parents[1]
     manifest = root / "android" / "app" / "src" / "main" / "AndroidManifest.xml"
     icon = root / "android" / "app" / "src" / "main" / "res" / "drawable" / "photos_icon.xml"
+    gradle_kts = root / "android" / "app" / "build.gradle.kts"
+    gradle_groovy = root / "android" / "app" / "build.gradle"
 
     if not manifest.is_file():
         raise SystemExit(f"Android manifest not found: {manifest}")
@@ -53,10 +55,45 @@ def main() -> None:
             text = text.replace("<application", f"    {permission}\n\n    <application", 1)
 
     manifest.write_text(text, encoding="utf-8")
+
+    if gradle_kts.is_file():
+        gradle_file = gradle_kts
+        gradle_text = gradle_file.read_text(encoding="utf-8")
+        if "abiFilters" not in gradle_text:
+            marker = "    defaultConfig {"
+            if gradle_text.count(marker) != 1:
+                raise SystemExit("Could not find exactly one defaultConfig block in build.gradle.kts")
+            gradle_text = gradle_text.replace(
+                marker,
+                marker + '\\n        ndk {\\n            abiFilters += listOf("arm64-v8a")\\n        }',
+                1,
+            )
+        if 'abiFilters += listOf("arm64-v8a")' not in gradle_text:
+            raise SystemExit("Android ABI filter is not configured for arm64-v8a")
+        gradle_file.write_text(gradle_text, encoding="utf-8")
+    elif gradle_groovy.is_file():
+        gradle_file = gradle_groovy
+        gradle_text = gradle_file.read_text(encoding="utf-8")
+        if "abiFilters" not in gradle_text:
+            marker = "    defaultConfig {"
+            if gradle_text.count(marker) != 1:
+                raise SystemExit("Could not find exactly one defaultConfig block in build.gradle")
+            gradle_text = gradle_text.replace(
+                marker,
+                marker + '\\n        ndk {\\n            abiFilters "arm64-v8a"\\n        }',
+                1,
+            )
+        if 'abiFilters "arm64-v8a"' not in gradle_text:
+            raise SystemExit("Android ABI filter is not configured for arm64-v8a")
+        gradle_file.write_text(gradle_text, encoding="utf-8")
+    else:
+        raise SystemExit("Android app Gradle file not found")
+
     icon.parent.mkdir(parents=True, exist_ok=True)
     icon.write_text(VECTOR_ICON, encoding="utf-8")
-    print("Configured Photos label, offline-only media permissions, and native vector launcher icon.")
+    print("Configured Photos label, offline-only media permissions, native vector launcher icon, and arm64-v8a ABI filter.")
     print(f"Launcher icon: {icon}")
+    print(f"Android Gradle config: {gradle_file}")
 
 
 if __name__ == "__main__":
