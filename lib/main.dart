@@ -1,6 +1,5 @@
 import 'dart:developer' as developer;
 
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:photo_manager_image_provider/photo_manager_image_provider.dart';
@@ -1265,7 +1264,7 @@ class _ZoomableImageCanvasState extends State<ZoomableImageCanvas> {
     return Stack(
       key: widget.key == null
           ? const Key('photoZoomCanvas')
-          : ValueKey<String>('photoZoomCanvas-' + widget.key.toString()),
+          : ValueKey<String>('photoZoomCanvas-${widget.key}'),
       fit: StackFit.expand,
       clipBehavior: Clip.none,
       children: [
@@ -1275,7 +1274,7 @@ class _ZoomableImageCanvasState extends State<ZoomableImageCanvas> {
           child: InteractiveViewer(
             key: widget.key == null
               ? const Key('photoZoomViewer')
-              : ValueKey<String>('photoZoomViewer-' + widget.key.toString()),
+              : ValueKey<String>('photoZoomViewer-${widget.key}'),
             transformationController: _transformationController,
             constrained: true,
             minScale: 1,
@@ -1432,7 +1431,7 @@ class _PhotoViewerState extends State<PhotoViewer> {
                 }
                 return ZoomableImageCanvas(
                   key: ValueKey<String>(
-                    'photoZoom-' + photo.id + '-' + _canvasVersion.toString(),
+                    'photoZoom-${photo.id}-$_canvasVersion',
                   ),
                   onScaleChanged: (scale) =>
                       _handleScaleChanged(photo.id, scale),
