@@ -95,25 +95,25 @@ def main() -> None:
     if "PHOTOS_ARM64_ABI_PACKAGING_EXCLUSIONS" not in gradle_text:
         if gradle_file.suffix == ".kts":
             gradle_text += (
-                "\\n\\n// PHOTOS_ARM64_ABI_PACKAGING_EXCLUSIONS\\n"
-                "android {\\n"
-                "    packaging {\\n"
-                "        jniLibs {\\n"
-                '            excludes += setOf("lib/armeabi-v7a/**", "lib/x86/**", "lib/x86_64/**")\\n'
-                "        }\\n"
-                "    }\\n"
-                "}\\n"
+                "\n\n// PHOTOS_ARM64_ABI_PACKAGING_EXCLUSIONS\n"
+                "android {\n"
+                "    packaging {\n"
+                "        jniLibs {\n"
+                '            excludes += setOf("lib/armeabi-v7a/**", "lib/x86/**", "lib/x86_64/**")\n'
+                "        }\n"
+                "    }\n"
+                "}\n"
             )
         else:
             gradle_text += (
-                "\\n\\n// PHOTOS_ARM64_ABI_PACKAGING_EXCLUSIONS\\n"
-                "android {\\n"
-                "    packaging {\\n"
-                "        jniLibs {\\n"
-                '            excludes += ["lib/armeabi-v7a/**", "lib/x86/**", "lib/x86_64/**"]\\n'
-                "        }\\n"
-                "    }\\n"
-                "}\\n"
+                "\n\n// PHOTOS_ARM64_ABI_PACKAGING_EXCLUSIONS\n"
+                "android {\n"
+                "    packaging {\n"
+                "        jniLibs {\n"
+                '            excludes += ["lib/armeabi-v7a/**", "lib/x86/**", "lib/x86_64/**"]\n'
+                "        }\n"
+                "    }\n"
+                "}\n"
             )
         gradle_file.write_text(gradle_text, encoding="utf-8")
 
