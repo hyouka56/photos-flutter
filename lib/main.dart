@@ -1,5 +1,6 @@
 import 'dart:developer' as developer;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:photo_manager_image_provider/photo_manager_image_provider.dart';
@@ -681,12 +682,21 @@ class _PhotosHomeState extends State<PhotosHome> {
   }
 
   void _openPhoto(GalleryPhoto photo) {
+    final sourcePhotos = _selectedTab == 2 ? _favoritePhotos : _photos;
+    final photos = List<GalleryPhoto>.from(sourcePhotos);
+    var initialIndex = photos.indexWhere((item) => item.id == photo.id);
+    if (initialIndex < 0) {
+      photos.add(photo);
+      initialIndex = photos.length - 1;
+    }
+
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (context) => PhotoViewer(
-          photo: photo,
-          initiallyFavorite: _favoriteIds.contains(photo.id),
-          onFavoriteChanged: (value) => _setFavorite(photo, value),
+          photos: photos,
+          initialIndex: initialIndex,
+          favoriteIds: Set<String>.from(_favoriteIds),
+          onFavoriteChanged: _setFavorite,
         ),
       ),
     );
@@ -1172,27 +1182,32 @@ class _AlbumTile extends StatelessWidget {
 class PhotoViewer extends StatefulWidget {
   const PhotoViewer({
     super.key,
-    required this.photo,
-    required this.initiallyFavorite,
+    required this.photos,
+    required this.initialIndex,
+    required this.favoriteIds,
     required this.onFavoriteChanged,
   });
 
-  final GalleryPhoto photo;
-  final bool initiallyFavorite;
-  final ValueChanged<bool> onFavoriteChanged;
+  final List<GalleryPhoto> photos;
+  final int initialIndex;
+  final Set<String> favoriteIds;
+  final Future<void> Function(GalleryPhoto photo, bool isFavorite)
+      onFavoriteChanged;
 
   @override
   State<PhotoViewer> createState() => _PhotoViewerState();
 }
 
-/// Full-viewport image canvas. The child always has the viewport's size;
-/// the image itself is centered with BoxFit.contain. InteractiveViewer can
-/// therefore preserve the user's pinch focal point for portrait and landscape
-/// images alike, without starting from an offset intrinsic-size rectangle.
+/// Full-viewport image canvas with focal-point-correct zooming.
 class ZoomableImageCanvas extends StatefulWidget {
-  const ZoomableImageCanvas({super.key, required this.child});
+  const ZoomableImageCanvas({
+    super.key,
+    required this.child,
+    this.onScaleChanged,
+  });
 
   final Widget child;
+  final ValueChanged<double>? onScaleChanged;
 
   @override
   State<ZoomableImageCanvas> createState() => _ZoomableImageCanvasState();
@@ -1210,9 +1225,28 @@ class _ZoomableImageCanvasState extends State<ZoomableImageCanvas> {
   }
 
   void _handleTransformChanged() {
-    final nextScale = _transformationController.value.getMaxScaleOnAxis();
-    if (!mounted || (nextScale - _scale).abs() < 0.015) return;
+    final matrix = _transformationController.value;
+    final nextScale = matrix.getMaxScaleOnAxis();
+    if (!mounted) return;
+
+    if (nextScale <= 1.015) {
+      final hasResidualTransform = (nextScale - 1).abs() > 0.001 ||
+          matrix.entry(0, 3).abs() > 0.5 ||
+          matrix.entry(1, 3).abs() > 0.5;
+      if (hasResidualTransform) {
+        _transformationController.value = Matrix4.identity();
+        return;
+      }
+      if (_scale != 1) {
+        setState(() => _scale = 1);
+        widget.onScaleChanged?.call(1);
+      }
+      return;
+    }
+
+    if ((nextScale - _scale).abs() < 0.015) return;
     setState(() => _scale = nextScale);
+    widget.onScaleChanged?.call(nextScale);
   }
 
   void _resetZoom() {
@@ -1228,140 +1262,240 @@ class _ZoomableImageCanvasState extends State<ZoomableImageCanvas> {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) => Stack(
-        key: const Key('photoZoomCanvas'),
-        fit: StackFit.expand,
-        clipBehavior: Clip.none,
-        children: [
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onDoubleTap: _resetZoom,
-            child: InteractiveViewer(
-              key: const Key('photoZoomViewer'),
-              transformationController: _transformationController,
-              constrained: true,
-              alignment: Alignment.center,
-              minScale: 1,
-              maxScale: 8,
-              boundaryMargin: const EdgeInsets.all(1000),
-              clipBehavior: Clip.none,
-              child: SizedBox.expand(child: widget.child),
-            ),
+    return Stack(
+      key: widget.key == null
+          ? const Key('photoZoomCanvas')
+          : ValueKey<String>('photoZoomCanvas-' + widget.key.toString()),
+      fit: StackFit.expand,
+      clipBehavior: Clip.none,
+      children: [
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onDoubleTap: _resetZoom,
+          child: InteractiveViewer(
+            key: widget.key == null
+              ? const Key('photoZoomViewer')
+              : ValueKey<String>('photoZoomViewer-' + widget.key.toString()),
+            transformationController: _transformationController,
+            constrained: true,
+            minScale: 1,
+            maxScale: 8,
+            boundaryMargin: const EdgeInsets.all(1000),
+            clipBehavior: Clip.none,
+            // Null alignment keeps focal calculations and rendering on the
+            // same top-left transform origin.
+            child: SizedBox.expand(child: widget.child),
           ),
-          if (_scale > 1.015)
-            Positioned(
-              right: 16,
-              bottom: 22,
-              child: SafeArea(
-                child: Material(
-                  color: Colors.black.withValues(alpha: 0.7),
-                  shape: const CircleBorder(),
-                  child: IconButton(
-                    key: const Key('resetZoomButton'),
-                    tooltip: 'Reset zoom',
-                    onPressed: _resetZoom,
-                    icon: const Icon(Icons.center_focus_strong_rounded),
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
 
 class _PhotoViewerState extends State<PhotoViewer> {
-  late bool _isFavorite;
+  late final PageController _pageController;
+  late int _currentIndex;
+  late Set<String> _favoriteIds;
+  double _currentScale = 1;
+  int _canvasVersion = 0;
+
+  final Set<int> _activePointers = <int>{};
+  Offset? _swipeStart;
+  bool _swipeStartedAtDefaultScale = false;
+  bool _multiTouchGesture = false;
+
+  GalleryPhoto get _currentPhoto => widget.photos[_currentIndex];
+  bool get _isFavorite => _favoriteIds.contains(_currentPhoto.id);
 
   @override
   void initState() {
     super.initState();
-    _isFavorite = widget.initiallyFavorite;
+    _currentIndex = widget.initialIndex;
+    _pageController = PageController(initialPage: _currentIndex);
+    _favoriteIds = Set<String>.from(widget.favoriteIds);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
   }
 
   void _toggleFavorite() {
-    final next = !_isFavorite;
-    setState(() => _isFavorite = next);
-    widget.onFavoriteChanged(next);
+    final photo = _currentPhoto;
+    final next = !_favoriteIds.contains(photo.id);
+    setState(() {
+      if (next) {
+        _favoriteIds.add(photo.id);
+      } else {
+        _favoriteIds.remove(photo.id);
+      }
+    });
+    widget.onFavoriteChanged(photo, next);
+  }
+
+  void _handlePageChanged(int index) {
+    setState(() {
+      _currentIndex = index;
+      _currentScale = 1;
+      _canvasVersion++;
+    });
+  }
+
+  void _handleScaleChanged(String photoId, double scale) {
+    if (_currentPhoto.id == photoId) {
+      _currentScale = scale;
+    }
+  }
+
+  void _handlePointerDown(PointerDownEvent event) {
+    if (_activePointers.isEmpty) {
+      _swipeStart = event.localPosition;
+      _swipeStartedAtDefaultScale = _currentScale <= 1.015;
+      _multiTouchGesture = false;
+    } else {
+      _multiTouchGesture = true;
+    }
+    _activePointers.add(event.pointer);
+  }
+
+  void _handlePointerUp(PointerEvent event) {
+    final isLastPointer =
+        _activePointers.length == 1 && _activePointers.contains(event.pointer);
+    if (isLastPointer &&
+        _swipeStart != null &&
+        !_multiTouchGesture &&
+        _swipeStartedAtDefaultScale &&
+        _currentScale <= 1.015) {
+      final delta = event.localPosition - _swipeStart!;
+      final threshold =
+          (MediaQuery.sizeOf(context).width * 0.14).clamp(55.0, 100.0);
+      if (delta.dx.abs() >= threshold &&
+          delta.dx.abs() > delta.dy.abs() * 1.2) {
+        final targetIndex =
+            delta.dx < 0 ? _currentIndex + 1 : _currentIndex - 1;
+        if (targetIndex >= 0 && targetIndex < widget.photos.length) {
+          _pageController.animateToPage(
+            targetIndex,
+            duration: const Duration(milliseconds: 240),
+            curve: Curves.easeOutCubic,
+          );
+        }
+      }
+    }
+
+    _activePointers.remove(event.pointer);
+    if (_activePointers.isEmpty) {
+      _swipeStart = null;
+      _swipeStartedAtDefaultScale = false;
+      _multiTouchGesture = false;
+    }
+  }
+
+  void _handlePointerCancel(PointerCancelEvent event) {
+    _activePointers.remove(event.pointer);
+    _multiTouchGesture = true;
+    if (_activePointers.isEmpty) {
+      _swipeStart = null;
+      _swipeStartedAtDefaultScale = false;
+      _multiTouchGesture = false;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final asset = widget.photo.asset;
-    final title = widget.photo.createdAt == null
+    final title = _currentPhoto.createdAt == null
         ? 'Photo'
-        : _formatDate(widget.photo.createdAt!);
+        : _formatDate(_currentPhoto.createdAt!);
 
     return Scaffold(
       backgroundColor: Colors.black,
-      body: Stack(
-        key: const Key('photoViewerCanvas'),
-        fit: StackFit.expand,
-        children: [
-          Positioned.fill(
-            child: asset == null
-                ? const Center(child: _PhotoPlaceholder())
-                : ZoomableImageCanvas(
-                    child: Image(
-                      image: AssetEntityImageProvider(
-                        asset,
-                        isOriginal: false,
-                        thumbnailSize: const ThumbnailSize.square(2400),
-                      ),
-                      fit: BoxFit.contain,
-                      alignment: Alignment.center,
-                      gaplessPlayback: true,
-                      errorBuilder: (context, error, stackTrace) =>
-                          const _PhotoPlaceholder(),
-                    ),
+      body: Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: _handlePointerDown,
+        onPointerUp: _handlePointerUp,
+        onPointerCancel: _handlePointerCancel,
+        child: Stack(
+          key: const Key('photoViewerCanvas'),
+          fit: StackFit.expand,
+          children: [
+            PageView.builder(
+              controller: _pageController,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: widget.photos.length,
+              onPageChanged: _handlePageChanged,
+              itemBuilder: (context, index) {
+                final photo = widget.photos[index];
+                final asset = photo.asset;
+                if (asset == null) {
+                  return const Center(child: _PhotoPlaceholder());
+                }
+                return ZoomableImageCanvas(
+                  key: ValueKey<String>(
+                    'photoZoom-' + photo.id + '-' + _canvasVersion.toString(),
                   ),
-          ),
-          SafeArea(
-            child: Align(
-              alignment: Alignment.topCenter,
-              child: Container(
-                height: 58,
-                color: Colors.black.withValues(alpha: 0.55),
-                child: Row(
-                  children: [
-                    IconButton(
-                      key: const Key('viewerBack'),
-                      tooltip: 'Back',
-                      onPressed: () => Navigator.of(context).maybePop(),
-                      icon: const Icon(Icons.arrow_back_rounded),
+                  onScaleChanged: (scale) =>
+                      _handleScaleChanged(photo.id, scale),
+                  child: Image(
+                    image: AssetEntityImageProvider(
+                      asset,
+                      isOriginal: false,
+                      thumbnailSize: const ThumbnailSize.square(2400),
                     ),
-                    Expanded(
-                      child: Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          color: Colors.white,
+                    fit: BoxFit.contain,
+                    alignment: Alignment.center,
+                    gaplessPlayback: true,
+                    errorBuilder: (context, error, stackTrace) =>
+                        const _PhotoPlaceholder(),
+                  ),
+                );
+              },
+            ),
+            SafeArea(
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: Container(
+                  height: 58,
+                  color: Colors.black.withValues(alpha: 0.55),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        key: const Key('viewerBack'),
+                        tooltip: 'Back',
+                        onPressed: () => Navigator.of(context).maybePop(),
+                        icon: const Icon(Icons.arrow_back_rounded),
+                      ),
+                      Expanded(
+                        child: Text(
+                          title,
+                          key: const Key('viewerPhotoTitle'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            color: Colors.white,
+                          ),
                         ),
                       ),
-                    ),
-                    IconButton(
-                      key: const Key('viewerFavorite'),
-                      onPressed: _toggleFavorite,
-                      tooltip:
-                          _isFavorite ? 'Remove favorite' : 'Add favorite',
-                      icon: Icon(
-                        _isFavorite
-                            ? Icons.favorite_rounded
-                            : Icons.favorite_border_rounded,
+                      IconButton(
+                        key: const Key('viewerFavorite'),
+                        onPressed: _toggleFavorite,
+                        tooltip:
+                            _isFavorite ? 'Remove favorite' : 'Add favorite',
+                        icon: Icon(
+                          _isFavorite
+                              ? Icons.favorite_rounded
+                              : Icons.favorite_border_rounded,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 6),
-                  ],
+                      const SizedBox(width: 6),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1371,5 +1505,5 @@ String _formatDate(DateTime date) {
   final local = date.toLocal();
   final month = local.month.toString().padLeft(2, '0');
   final day = local.day.toString().padLeft(2, '0');
-  return '$local.year-$month-$day';
+  return '${local.year}-$month-$day';
 }

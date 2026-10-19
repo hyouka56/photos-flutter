@@ -12,7 +12,8 @@ void main() {
     favorites = MemoryFavoritesStore();
   });
 
-  testWidgets('zoom canvas fills and centers the viewport and can reset zoom', (tester) async {
+  testWidgets('zoom stays focal, returns to default, and double tap resets',
+      (tester) async {
     await tester.pumpWidget(
       const MaterialApp(
         home: Scaffold(
@@ -33,27 +34,76 @@ void main() {
       find.byKey(const Key('photoZoomViewer')),
     );
     expect(viewer.constrained, isTrue);
-    expect(viewer.alignment, Alignment.center);
+    expect(viewer.alignment, isNull);
     final controller = viewer.transformationController!;
-    final identity = controller.value.clone();
-    expect(controller.value.getMaxScaleOnAxis(), 1);
-
-    controller.value = controller.value.clone()..scaleByDouble(3.0, 3.0, 1.0, 1.0);
-    await tester.pump();
-    expect(find.byKey(const Key('resetZoomButton')), findsOneWidget);
-
-    await tester.tap(find.byKey(const Key('resetZoomButton')));
-    await tester.pumpAndSettle();
+    final identity = Matrix4.identity();
     expect(controller.value.storage, equals(identity.storage));
+
+    final focalPoint = const Offset(300, 240);
+    final scenePointBefore = controller.toScene(focalPoint);
+    final firstFinger =
+        await tester.startGesture(const Offset(270, 240), pointer: 1);
+    final secondFinger =
+        await tester.startGesture(const Offset(330, 240), pointer: 2);
+    await tester.pump();
+    await firstFinger.moveTo(const Offset(240, 240));
+    await tester.pump(const Duration(milliseconds: 20));
+    await secondFinger.moveTo(const Offset(360, 240));
+    await tester.pump(const Duration(milliseconds: 20));
+
+    final scenePointAfter = controller.toScene(focalPoint);
+    expect(scenePointAfter.dx, closeTo(scenePointBefore.dx, 1.0));
+    expect(scenePointAfter.dy, closeTo(scenePointBefore.dy, 1.0));
+    expect(controller.value.getMaxScaleOnAxis(), greaterThan(1.1));
+
+    await firstFinger.up();
+    await secondFinger.up();
+    await tester.pumpAndSettle();
+
+    controller.value = Matrix4.identity()..translateByDouble(50, 30, 0, 1);
+    await tester.pump();
+    expect(controller.value.storage, equals(identity.storage));
+
+    controller.value = controller.value.clone()
+      ..scaleByDouble(2.0, 2.0, 1.0, 1.0);
+    await tester.pump();
     expect(find.byKey(const Key('resetZoomButton')), findsNothing);
 
-    controller.value = controller.value.clone()..scaleByDouble(2.0, 2.0, 1.0, 1.0);
-    await tester.pump();
     await tester.tapAt(const Offset(80, 80));
     await tester.pump(const Duration(milliseconds: 50));
     await tester.tapAt(const Offset(80, 80));
     await tester.pumpAndSettle();
     expect(controller.value.storage, equals(identity.storage));
+  });
+
+  testWidgets('photo viewer swipes to next and previous photo at default zoom',
+      (tester) async {
+    final photos = <GalleryPhoto>[
+      GalleryPhoto(id: 'swipe-1', asset: null, createdAt: DateTime(2025, 1, 1)),
+      GalleryPhoto(id: 'swipe-2', asset: null, createdAt: DateTime(2025, 1, 2)),
+      GalleryPhoto(id: 'swipe-3', asset: null, createdAt: DateTime(2025, 1, 3)),
+    ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PhotoViewer(
+          photos: photos,
+          initialIndex: 1,
+          favoriteIds: const <String>{},
+          onFavoriteChanged: (photo, isFavorite) async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('2025-01-02'), findsOneWidget);
+
+    await tester.dragFrom(const Offset(420, 300), const Offset(-240, 0));
+    await tester.pumpAndSettle();
+    expect(find.text('2025-01-03'), findsOneWidget);
+
+    await tester.dragFrom(const Offset(380, 300), const Offset(240, 0));
+    await tester.pumpAndSettle();
+    expect(find.text('2025-01-02'), findsOneWidget);
   });
 
   testWidgets('asks for photo access and retries after access is granted', (tester) async {
