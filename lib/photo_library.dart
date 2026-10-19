@@ -1,3 +1,6 @@
+import 'dart:io' show Platform;
+
+import 'package:flutter/services.dart';
 import 'package:photo_manager/photo_manager.dart';
 
 const allPhotosAlbumId = '__all_photos__';
@@ -46,6 +49,7 @@ abstract interface class PhotoLibrary {
     required int pageSize,
   });
   Future<List<GalleryPhoto>> findPhotosByIds(Set<String> ids);
+  Future<List<String>> deletePhotos(List<String> ids);
 }
 
 class PhotoManagerLibrary implements PhotoLibrary {
@@ -122,6 +126,30 @@ class PhotoManagerLibrary implements PhotoLibrary {
       size: pageSize,
     );
     return assets.map(GalleryPhoto.fromAsset).toList(growable: false);
+  }
+
+  static const MethodChannel _permanentDeleteChannel =
+      MethodChannel('photos/permanent_delete');
+
+  @override
+  Future<List<String>> deletePhotos(List<String> ids) async {
+    if (ids.isEmpty) return const <String>[];
+
+    if (Platform.isAndroid) {
+      try {
+        final deleted = await _permanentDeleteChannel.invokeListMethod<String>(
+          'deleteImagesPermanently',
+          <String, Object>{'ids': ids},
+        );
+        return deleted ?? const <String>[];
+      } on PlatformException catch (error) {
+        if (error.code != 'UNSUPPORTED_VERSION') rethrow;
+      } on MissingPluginException {
+        // Older builds can fall back to the plugin's supported editor API.
+      }
+    }
+
+    return PhotoManager.editor.deleteWithIds(ids);
   }
 
   @override

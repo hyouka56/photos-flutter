@@ -1,4 +1,5 @@
 import 'dart:developer' as developer;
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
@@ -114,6 +115,26 @@ class _PhotosHomeState extends State<PhotosHome> {
 
   int _selectedTab = 0;
   int _page = 0;
+  int _albumOriginTab = 1;
+  bool _openedFromAlbums = false;
+  bool _selectionMode = false;
+  bool _selectingAll = false;
+  bool _allSelected = false;
+  bool _deleting = false;
+  final Set<String> _selectedPhotoIds = <String>{};
+
+  bool get _interceptsSystemBack =>
+      _selectionMode || _selectedTab != 0 || _openedFromAlbums;
+
+  LibraryAlbum get _allPhotosAlbum => _albums.firstWhere(
+        (album) => album.isAll,
+        orElse: () => const LibraryAlbum(
+          id: allPhotosAlbumId,
+          name: 'All photos',
+          count: 0,
+          isAll: true,
+        ),
+      );
 
   List<LibraryAlbum> _albums = const [];
   LibraryAlbum _activeAlbum = const LibraryAlbum(
@@ -339,7 +360,12 @@ class _PhotosHomeState extends State<PhotosHome> {
   }
 
   Future<void> _openAlbum(LibraryAlbum album) async {
+    _albumOriginTab = _selectedTab;
     setState(() {
+      _openedFromAlbums = true;
+      _selectionMode = false;
+      _selectedPhotoIds.clear();
+      _allSelected = false;
       _activeAlbum = album;
       _selectedTab = 0;
       _loading = true;
@@ -404,10 +430,207 @@ class _PhotosHomeState extends State<PhotosHome> {
   }
 
   Future<void> _selectTab(int index) async {
-    setState(() => _selectedTab = index);
-    if (index == 2 && !_favoritesLoaded) {
-      await _loadFavorites();
+    final leavingAlbum = _openedFromAlbums;
+    setState(() {
+      _selectedTab = index;
+      _selectionMode = false;
+      _selectedPhotoIds.clear();
+      _selectingAll = false;
+      _allSelected = false;
+      if (leavingAlbum) {
+        _openedFromAlbums = false;
+        _activeAlbum = _allPhotosAlbum;
+        _page = 0;
+        _hasMore = false;
+        if (index == 0) _loading = true;
+      }
+    });
+    if (leavingAlbum && index == 0) await _refresh();
+    if (index == 2 && !_favoritesLoaded) await _loadFavorites();
+  }
+
+  Future<void> _handleSystemBack() async {
+    if (_selectionMode) {
+      _clearSelection();
+      return;
     }
+    if (_openedFromAlbums) {
+      await _selectTab(_albumOriginTab);
+      return;
+    }
+    if (_selectedTab != 0) await _selectTab(0);
+  }
+
+  void _clearSelection() {
+    setState(() {
+      _selectionMode = false;
+      _selectedPhotoIds.clear();
+      _selectingAll = false;
+      _allSelected = false;
+    });
+  }
+
+  void _beginPhotoSelection(GalleryPhoto photo) {
+    setState(() {
+      _selectionMode = true;
+      _selectedPhotoIds..clear()..add(photo.id);
+      _allSelected = false;
+    });
+  }
+
+  void _togglePhotoSelection(GalleryPhoto photo) {
+    setState(() {
+      if (_selectedPhotoIds.contains(photo.id)) {
+        _selectedPhotoIds.remove(photo.id);
+      } else {
+        _selectedPhotoIds.add(photo.id);
+      }
+      _selectionMode = _selectedPhotoIds.isNotEmpty;
+      _allSelected = false;
+    });
+  }
+
+  Future<List<GalleryPhoto>> _loadAllPhotosInCurrentScope() async {
+    if (_selectedTab == 2) return List<GalleryPhoto>.from(_favoritePhotos);
+    final result = <GalleryPhoto>[];
+    var page = 0;
+    while (true) {
+      final batch = await widget.library.getPhotos(
+        albumId: _activeAlbum.id,
+        page: page,
+        pageSize: _pageSize,
+      );
+      result.addAll(batch);
+      if (batch.length < _pageSize) break;
+      page++;
+    }
+    return result;
+  }
+
+  Future<void> _selectAllPhotosInScope() async {
+    if (_deleting || _selectingAll) return;
+    if (_allSelected) {
+      _clearSelection();
+      return;
+    }
+    setState(() => _selectingAll = true);
+    try {
+      final allPhotos = await _loadAllPhotosInCurrentScope();
+      if (!mounted) return;
+      if (allPhotos.isEmpty) {
+        setState(() { _selectingAll = false; _allSelected = false; });
+        _showMessage('There are no photos to select.');
+        return;
+      }
+      setState(() {
+        _selectedPhotoIds..clear()..addAll(allPhotos.map((photo) => photo.id));
+        _selectionMode = true;
+        _selectingAll = false;
+        _allSelected = true;
+      });
+    } catch (error, stackTrace) {
+      developer.log('Could not select all photos in this view.', name: 'photos.selection', error: error, stackTrace: stackTrace);
+      if (!mounted) return;
+      setState(() => _selectingAll = false);
+      _showMessage('Could not select all photos. Try again.');
+    }
+  }
+
+  Future<void> _deleteSelectedPhotos() async {
+    if (_selectedPhotoIds.isEmpty || _deleting) return;
+    final requestedIds = Set<String>.from(_selectedPhotoIds);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF202020),
+        title: const Text('Delete permanently?'),
+        content: Text(requestedIds.length.toString() +
+            (requestedIds.length == 1
+                ? ' photo will be deleted from this device. This cannot be undone.'
+                : ' photos will be deleted from this device. This cannot be undone.')),
+        actions: [
+          TextButton(
+            key: const Key('cancelDeletePhotosButton'),
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const Key('confirmDeletePhotosButton'),
+            style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Delete permanently'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _deleting = true);
+    Set<String> deletedIds;
+    try {
+      deletedIds = (await widget.library.deletePhotos(requestedIds.toList()))
+          .toSet().intersection(requestedIds);
+    } catch (error, stackTrace) {
+      developer.log('Could not permanently delete selected photos.', name: 'photos.deletion', error: error, stackTrace: stackTrace);
+      if (!mounted) return;
+      setState(() => _deleting = false);
+      _showMessage('Delete failed. No photos were removed from the app view.');
+      return;
+    }
+    if (deletedIds.isEmpty) {
+      if (!mounted) return;
+      setState(() => _deleting = false);
+      _showMessage('No photos were deleted. Android may have canceled its confirmation.');
+      return;
+    }
+
+    final nextFavoriteIds = Set<String>.from(_favoriteIds)..removeAll(deletedIds);
+    try {
+      await widget.favoritesStore.save(nextFavoriteIds);
+    } catch (error, stackTrace) {
+      developer.log('Could not persist favorites after deletion.', name: 'photos.favorites', error: error, stackTrace: stackTrace);
+    }
+
+    var refreshedAlbums = _albums;
+    var refreshedAlbum = _activeAlbum;
+    var refreshedPhotos = _photos.where((photo) => !deletedIds.contains(photo.id)).toList();
+    var refreshedFavorites = _favoritePhotos.where((photo) => !deletedIds.contains(photo.id)).toList();
+    try {
+      refreshedAlbums = await widget.library.getAlbums();
+      refreshedAlbum = refreshedAlbums.firstWhere(
+        (album) => album.id == _activeAlbum.id,
+        orElse: () => refreshedAlbums.firstWhere((album) => album.isAll, orElse: () => _activeAlbum),
+      );
+      if (_selectedTab == 0) {
+        refreshedPhotos = await widget.library.getPhotos(albumId: refreshedAlbum.id, page: 0, pageSize: _pageSize);
+      }
+      refreshedFavorites = await widget.library.findPhotosByIds(nextFavoriteIds);
+    } catch (error, stackTrace) {
+      developer.log('Could not fully refresh library after deletion.', name: 'photos.deletion', error: error, stackTrace: stackTrace);
+    }
+    if (!mounted) return;
+    setState(() {
+      _albums = refreshedAlbums;
+      _activeAlbum = refreshedAlbum;
+      _favoriteIds = nextFavoriteIds;
+      _favoritePhotos = refreshedFavorites;
+      _favoritesLoaded = true;
+      if (_selectedTab == 0) {
+        _photos = refreshedPhotos;
+        _page = 0;
+        _hasMore = refreshedPhotos.length == _pageSize;
+      }
+      _selectedPhotoIds.removeAll(deletedIds);
+      _selectionMode = false;
+      _selectingAll = false;
+      _allSelected = false;
+      _deleting = false;
+      _loading = false;
+    });
+    final failedCount = requestedIds.length - deletedIds.length;
+    _showMessage(failedCount == 0
+        ? '${deletedIds.length} photos deleted permanently.'
+        : '${deletedIds.length} deleted. $failedCount could not be deleted.');
   }
 
   Future<void> _loadFavorites() async {
@@ -486,7 +709,7 @@ class _PhotosHomeState extends State<PhotosHome> {
 
   String get _subtitle {
     if (!_hasAccess) return 'Private photo library';
-    if (_selectedTab == 1) return '$_albums.length albums on this device';
+    if (_selectedTab == 1) return '${_albums.length} albums on this device';
     if (_selectedTab == 2) {
       return '${_favoriteIds.length} saved favorites';
     }
@@ -496,62 +719,73 @@ class _PhotosHomeState extends State<PhotosHome> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope<void>(
+      canPop: !_interceptsSystemBack,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) _handleSystemBack();
+      },
+      child: Scaffold(
       body: SafeArea(
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(18, 14, 12, 12),
+              padding: const EdgeInsets.fromLTRB(10, 10, 8, 10),
               child: Row(
                 children: [
-                  if (_selectedTab == 0 && !_activeAlbum.isAll)
+                  if (_selectionMode) ...[
                     IconButton(
-                      key: const Key('backToAllPhotos'),
-                      tooltip: 'All photos',
-                      onPressed: () => _openAlbum(
-                        _albums.firstWhere(
-                          (album) => album.isAll,
-                          orElse: () => const LibraryAlbum(
-                            id: allPhotosAlbumId,
-                            name: 'All photos',
-                            count: 0,
-                            isAll: true,
-                          ),
-                        ),
+                      key: const Key('cancelPhotoSelectionButton'),
+                      tooltip: 'Cancel selection',
+                      onPressed: _deleting ? null : _clearSelection,
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                    Expanded(
+                      child: Text(
+                        '${_selectedPhotoIds.length} selected',
+                        key: const Key('selectionCount'),
+                        style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w700),
                       ),
-                      icon: const Icon(Icons.arrow_back_rounded),
-                    )
-                  else
-                    const Padding(
-                      padding: EdgeInsets.only(right: 12),
-                      child: Icon(Icons.photo_library_rounded, size: 29),
                     ),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _title,
-                          key: const Key('pageTitle'),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 27,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.7,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          _subtitle,
-                          style: const TextStyle(
-                            color: Color(0xFF9B9B9B),
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
+                    TextButton(
+                      key: const Key('selectAllPhotosButton'),
+                      onPressed: _deleting || _selectingAll ? null : _selectAllPhotosInScope,
+                      child: _selectingAll
+                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          : Text(_allSelected ? 'Clear all' : 'Select all'),
                     ),
-                  ),
+                    IconButton(
+                      key: const Key('deleteSelectedPhotosButton'),
+                      tooltip: 'Delete permanently',
+                      onPressed: _deleting || _selectedPhotoIds.isEmpty ? null : _deleteSelectedPhotos,
+                      icon: _deleting
+                          ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          : const Icon(Icons.delete_forever_outlined),
+                    ),
+                  ] else ...[
+                    if (_openedFromAlbums)
+                      IconButton(
+                        key: const Key('backToAlbums'),
+                        tooltip: 'Albums',
+                        onPressed: () => _selectTab(_albumOriginTab),
+                        icon: const Icon(Icons.arrow_back_rounded),
+                      )
+                    else
+                      const Padding(
+                        padding: EdgeInsets.only(left: 8, right: 12),
+                        child: Icon(Icons.photo_library_rounded, size: 29),
+                      ),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(_title, key: const Key('pageTitle'), maxLines: 1, overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 27, fontWeight: FontWeight.w700, letterSpacing: -0.7)),
+                          const SizedBox(height: 2),
+                          Text(_subtitle, style: const TextStyle(color: Color(0xFF9B9B9B), fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -567,31 +801,15 @@ class _PhotosHomeState extends State<PhotosHome> {
           ],
         ),
       ),
-      bottomNavigationBar: NavigationBar(
+      bottomNavigationBar: _selectionMode ? null : NavigationBar(
         selectedIndex: _selectedTab,
-        onDestinationSelected: (index) {
-          _selectTab(index);
-        },
+        onDestinationSelected: (index) { _selectTab(index); },
         destinations: const [
-          NavigationDestination(
-            key: Key('photosTab'),
-            icon: Icon(Icons.photo_outlined),
-            selectedIcon: Icon(Icons.photo),
-            label: 'Photos',
-          ),
-          NavigationDestination(
-            key: Key('albumsTab'),
-            icon: Icon(Icons.folder_outlined),
-            selectedIcon: Icon(Icons.folder),
-            label: 'Albums',
-          ),
-          NavigationDestination(
-            key: Key('favoritesTab'),
-            icon: Icon(Icons.favorite_border_rounded),
-            selectedIcon: Icon(Icons.favorite_rounded),
-            label: 'Favorites',
-          ),
+          NavigationDestination(key: Key('photosTab'), icon: Icon(Icons.photo_outlined), selectedIcon: Icon(Icons.photo), label: 'Photos'),
+          NavigationDestination(key: Key('albumsTab'), icon: Icon(Icons.folder_outlined), selectedIcon: Icon(Icons.folder), label: 'Albums'),
+          NavigationDestination(key: Key('favoritesTab'), icon: Icon(Icons.favorite_border_rounded), selectedIcon: Icon(Icons.favorite_rounded), label: 'Favorites'),
         ],
+      ),
       ),
     );
   }
@@ -705,7 +923,7 @@ class _PhotosHomeState extends State<PhotosHome> {
 
     return NotificationListener<ScrollNotification>(
       onNotification: (notification) {
-        if (notification is ScrollUpdateNotification &&
+        if (!_selectionMode && notification is ScrollUpdateNotification &&
             notification.metrics.extentAfter < 700) {
           _loadMore();
         }
@@ -735,11 +953,11 @@ class _PhotosHomeState extends State<PhotosHome> {
           return _PhotoTile(
             photo: photo,
             isFavorite: _favoriteIds.contains(photo.id),
-            onTap: () => _openPhoto(photo),
-            onFavoriteTap: () => _setFavorite(
-              photo,
-              !_favoriteIds.contains(photo.id),
-            ),
+            isSelected: _selectedPhotoIds.contains(photo.id),
+            selectionMode: _selectionMode,
+            onTap: () => _selectionMode ? _togglePhotoSelection(photo) : _openPhoto(photo),
+            onLongPress: () => _beginPhotoSelection(photo),
+            onFavoriteTap: () => _setFavorite(photo, !_favoriteIds.contains(photo.id)),
           );
         },
       ),
@@ -829,91 +1047,49 @@ class _MessageState extends StatelessWidget {
 }
 
 class _PhotoTile extends StatelessWidget {
-  const _PhotoTile({
-    required this.photo,
-    required this.isFavorite,
-    required this.onTap,
-    required this.onFavoriteTap,
-  });
-
+  const _PhotoTile({required this.photo, required this.isFavorite, required this.isSelected,
+    required this.selectionMode, required this.onTap, required this.onLongPress, required this.onFavoriteTap});
   final GalleryPhoto photo;
   final bool isFavorite;
+  final bool isSelected;
+  final bool selectionMode;
   final VoidCallback onTap;
+  final VoidCallback onLongPress;
   final VoidCallback onFavoriteTap;
 
   @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(5),
-      child: Material(
-        color: const Color(0xFF1D1D1D),
-        child: InkWell(
-          key: Key('photoTile-${photo.id}'),
-          onTap: onTap,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              if (photo.asset != null)
-                Image(
-                  image: AssetEntityImageProvider(
-                    photo.asset!,
-                    isOriginal: false,
-                    thumbnailSize: const ThumbnailSize.square(420),
-                  ),
-                  fit: BoxFit.cover,
-                  gaplessPlayback: true,
-                  errorBuilder: (context, error, stackTrace) =>
-                      const _PhotoPlaceholder(),
-                )
-              else
-                const _PhotoPlaceholder(),
-              Positioned(
-                top: 2,
-                right: 2,
-                child: IconButton(
-                  key: Key('favorite-${photo.id}'),
-                  tooltip: isFavorite ? 'Remove favorite' : 'Add favorite',
-                  onPressed: onFavoriteTap,
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.all(5),
-                  constraints: const BoxConstraints.tightFor(
-                    width: 34,
-                    height: 34,
-                  ),
-                  icon: Icon(
-                    isFavorite
-                        ? Icons.favorite_rounded
-                        : Icons.favorite_border_rounded,
-                    size: 19,
-                    color: Colors.white,
-                    shadows: const [
-                      Shadow(blurRadius: 8, color: Colors.black),
-                    ],
-                  ),
-                ),
-              ),
-              if (photo.createdAt != null)
-                Positioned(
-                  bottom: 5,
-                  left: 6,
-                  right: 6,
-                  child: Text(
-                    _formatDate(photo.createdAt!),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 10,
-                      color: Colors.white,
-                      shadows: [Shadow(blurRadius: 6, color: Colors.black)],
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
+  Widget build(BuildContext context) => ClipRRect(
+    borderRadius: BorderRadius.circular(5),
+    child: Material(
+      color: const Color(0xFF1D1D1D),
+      child: InkWell(
+        key: Key('photoTile-${photo.id}'), onTap: onTap, onLongPress: onLongPress,
+        child: Stack(fit: StackFit.expand, children: [
+          if (photo.asset != null)
+            Image(image: AssetEntityImageProvider(photo.asset!, isOriginal: false,
+              thumbnailSize: const ThumbnailSize.square(420)), fit: BoxFit.cover, gaplessPlayback: true,
+              errorBuilder: (context, error, stackTrace) => const _PhotoPlaceholder())
+          else const _PhotoPlaceholder(),
+          if (selectionMode)
+            Positioned(top: 6, right: 6, child: Container(width: 27, height: 27,
+              decoration: BoxDecoration(color: isSelected ? Colors.white : Colors.black.withValues(alpha: 0.45),
+                shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 1.5)),
+              child: isSelected ? const Icon(Icons.check_rounded, color: Colors.black, size: 18) : null))
+          else
+            Positioned(top: 2, right: 2, child: IconButton(
+              key: Key('favorite-${photo.id}'), tooltip: isFavorite ? 'Remove favorite' : 'Add favorite',
+              onPressed: onFavoriteTap, visualDensity: VisualDensity.compact, padding: const EdgeInsets.all(5),
+              constraints: const BoxConstraints.tightFor(width: 34, height: 34),
+              icon: Icon(isFavorite ? Icons.favorite_rounded : Icons.favorite_border_rounded, size: 19,
+                color: Colors.white, shadows: const [Shadow(blurRadius: 8, color: Colors.black)]))),
+          if (photo.createdAt != null)
+            Positioned(bottom: 5, left: 6, right: 6, child: Text(_formatDate(photo.createdAt!), maxLines: 1,
+              overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, color: Colors.white,
+                shadows: [Shadow(blurRadius: 6, color: Colors.black)]))),
+        ]),
       ),
-    );
-  }
+    ),
+  );
 }
 
 class _PhotoPlaceholder extends StatelessWidget {
@@ -1028,48 +1204,64 @@ class _PhotoViewerState extends State<PhotoViewer> {
   @override
   Widget build(BuildContext context) {
     final asset = widget.photo.asset;
+    final title = widget.photo.createdAt == null ? 'Photo' : _formatDate(widget.photo.createdAt!);
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        title: Text(
-          widget.photo.createdAt == null
-              ? 'Photo'
-              : _formatDate(widget.photo.createdAt!),
-          style: const TextStyle(fontSize: 16),
-        ),
-        actions: [
-          IconButton(
-            key: const Key('viewerFavorite'),
-            onPressed: _toggleFavorite,
-            tooltip: _isFavorite ? 'Remove favorite' : 'Add favorite',
-            icon: Icon(
-              _isFavorite
-                  ? Icons.favorite_rounded
-                  : Icons.favorite_border_rounded,
-            ),
-          ),
-          const SizedBox(width: 6),
-        ],
-      ),
-      body: Center(
-        child: asset == null
-            ? const _PhotoPlaceholder()
-            : InteractiveViewer(
-                minScale: 1,
-                maxScale: 5,
-                child: Image(
-                  image: AssetEntityImageProvider(
-                    asset,
-                    isOriginal: false,
-                    thumbnailSize: const ThumbnailSize.square(1800),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final sourceWidth = asset != null && asset.width > 0 ? asset.width.toDouble() : constraints.maxWidth;
+          final sourceHeight = asset != null && asset.height > 0 ? asset.height.toDouble() : constraints.maxHeight;
+          final fitScale = math.min(constraints.maxWidth / sourceWidth, constraints.maxHeight / sourceHeight).toDouble();
+          final imageWidth = sourceWidth * fitScale;
+          final imageHeight = sourceHeight * fitScale;
+          return Stack(
+            key: const Key('photoViewerCanvas'),
+            fit: StackFit.expand,
+            children: [
+              if (asset == null)
+                const Center(child: _PhotoPlaceholder())
+              else
+                Positioned.fill(
+                  child: InteractiveViewer(
+                    key: const Key('photoZoomViewer'),
+                    constrained: false,
+                    alignment: Alignment.center,
+                    minScale: 1,
+                    maxScale: 8,
+                    child: Image(
+                      image: AssetEntityImageProvider(asset, isOriginal: false, thumbnailSize: const ThumbnailSize.square(2400)),
+                      width: imageWidth,
+                      height: imageHeight,
+                      fit: BoxFit.fill,
+                      gaplessPlayback: true,
+                      errorBuilder: (context, error, stackTrace) => const _PhotoPlaceholder(),
+                    ),
                   ),
-                  fit: BoxFit.contain,
-                  gaplessPlayback: true,
-                  errorBuilder: (context, error, stackTrace) =>
-                      const _PhotoPlaceholder(),
+                ),
+              SafeArea(
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: Container(
+                    height: 58,
+                    color: Colors.black.withValues(alpha: 0.55),
+                    child: Row(
+                      children: [
+                        IconButton(key: const Key('viewerBack'), tooltip: 'Back',
+                          onPressed: () => Navigator.of(context).maybePop(), icon: const Icon(Icons.arrow_back_rounded)),
+                        Expanded(child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 16, color: Colors.white))),
+                        IconButton(key: const Key('viewerFavorite'), onPressed: _toggleFavorite,
+                          tooltip: _isFavorite ? 'Remove favorite' : 'Add favorite',
+                          icon: Icon(_isFavorite ? Icons.favorite_rounded : Icons.favorite_border_rounded)),
+                        const SizedBox(width: 6),
+                      ],
+                    ),
+                  ),
                 ),
               ),
+            ],
+          );
+        },
       ),
     );
   }

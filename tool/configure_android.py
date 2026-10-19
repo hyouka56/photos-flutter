@@ -10,11 +10,9 @@ VECTOR_ICON = """<?xml version="1.0" encoding="utf-8"?>
     android:height="108dp"
     android:viewportWidth="512"
     android:viewportHeight="512">
-    <path android:fillColor="#111111" android:pathData="M0,0h512v512h-512z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M96,112c0,-18 14,-32 32,-32h256c18,0 32,14 32,32v288c0,18 -14,32 -32,32h-256c-18,0 -32,-14 -32,-32z" />
-    <path android:fillColor="#111111" android:pathData="M128,144h256v224h-256z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M308,178a26,26 0,1 0,52 0a26,26 0,1 0,-52 0z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M152,336l62,-78 46,53 38,-42 42,67z" />
+    <path android:fillColor="#000000" android:pathData="M0,0h512v512h-512z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M320,132a34,34 0,1 0,68 0a34,34 0,1 0,-68 0z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M68,405l118,-157 70,90 63,-78 125,145z" />
 </vector>
 """
 
@@ -83,6 +81,94 @@ def main() -> None:
 
     if not manifest.is_file():
         raise SystemExit(f"Android manifest not found: {manifest}")
+
+    activity = root / "android" / "app" / "src" / "main" / "kotlin" / "com" / "hyouka" / "photos" / "MainActivity.kt"
+    activity.parent.mkdir(parents=True, exist_ok=True)
+    activity.write_text("""package com.hyouka.photos
+
+import android.app.Activity
+import android.content.ContentUris
+import android.content.Intent
+import android.os.Build
+import android.provider.MediaStore
+import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
+
+class MainActivity : FlutterActivity() {
+    private val channelName = "photos/permanent_delete"
+    private var pendingDeleteResult: MethodChannel.Result? = null
+    private var pendingDeleteIds: List<String> = emptyList()
+
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
+            .setMethodCallHandler { call, result ->
+                if (call.method != "deleteImagesPermanently") {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                    result.error("UNSUPPORTED_VERSION", "Use PhotoManager deletion on Android versions below 11.", null)
+                    return@setMethodCallHandler
+                }
+                if (pendingDeleteResult != null) {
+                    result.error("DELETE_IN_PROGRESS", "A delete confirmation is already open.", null)
+                    return@setMethodCallHandler
+                }
+                val ids = call.argument<List<String>>("ids")?.distinct().orEmpty()
+                if (ids.isEmpty()) {
+                    result.success(emptyList<String>())
+                    return@setMethodCallHandler
+                }
+                val numericIds = ids.mapNotNull { it.toLongOrNull() }
+                if (numericIds.size != ids.size) {
+                    result.error("INVALID_MEDIA_IDS", "The selected images contain invalid MediaStore identifiers.", null)
+                    return@setMethodCallHandler
+                }
+                val uris = numericIds.map {
+                    ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, it)
+                }
+                try {
+                    val request = MediaStore.createDeleteRequest(contentResolver, uris)
+                    pendingDeleteIds = ids
+                    pendingDeleteResult = result
+                    startIntentSenderForResult(request.intentSender, DELETE_REQUEST_CODE, null, 0, 0, 0)
+                } catch (error: Exception) {
+                    pendingDeleteResult = null
+                    pendingDeleteIds = emptyList()
+                    result.error("DELETE_REQUEST_FAILED", error.message ?: "Could not request media deletion.", null)
+                }
+            }
+    }
+
+    @Deprecated("Deprecated by Android, kept for Flutter's activity-result callback compatibility")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != DELETE_REQUEST_CODE) return
+        val result = pendingDeleteResult ?: return
+        val ids = pendingDeleteIds
+        pendingDeleteResult = null
+        pendingDeleteIds = emptyList()
+        if (resultCode != Activity.RESULT_OK) {
+            result.success(emptyList<String>())
+            return
+        }
+        val deleted = ids.filter { id ->
+            val numericId = id.toLongOrNull() ?: return@filter false
+            val uri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, numericId)
+            contentResolver.query(uri, arrayOf(MediaStore.Images.Media._ID), null, null, null)?.use { cursor ->
+                !cursor.moveToFirst()
+            } ?: true
+        }
+        result.success(deleted)
+    }
+
+    companion object {
+        private const val DELETE_REQUEST_CODE = 0x501A
+    }
+}
+""", encoding="utf-8")
 
     text = manifest.read_text(encoding="utf-8")
     text = re.sub(
@@ -176,7 +262,7 @@ def main() -> None:
     icon.parent.mkdir(parents=True, exist_ok=True)
     icon.write_text(VECTOR_ICON, encoding="utf-8")
     configure_dark_launch_screen(root)
-    print("Configured Photos label, Android media permissions, photo launcher icon, dark launch screen, and arm64-v8a ABI filter.")
+    print("Configured Photos label, Android media permissions, borderless sun-and-mountain icon, permanent media deletion request, dark launch screen, and arm64-v8a ABI filter.")
     print(f"Launcher icon: {icon}")
     print(f"Android Gradle config: {gradle_file}")
 

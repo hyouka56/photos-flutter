@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <title>Photos adaptive foreground</title>
-  <path d="M272 220h480a52 52 0 0 1 52 52v480a52 52 0 0 1-52 52H272a52 52 0 0 1-52-52V272a52 52 0 0 1 52-52z" fill="#FFFFFF"/>
-  <rect x="304" y="272" width="416" height="424" fill="#111111"/>
-  <circle cx="620" cy="360" r="38" fill="#FFFFFF"/>
-  <path d="M340 650 450 500l82 95 74-78 86 133z" fill="#FFFFFF"/>
+  <circle cx="694" cy="302" r="70" fill="#FFFFFF"/>
+  <path d="M120 790 356 478 496 648 618 500 904 790Z" fill="#FFFFFF"/>
 </svg>

@@ -73,8 +73,11 @@ jobs:
             grep -Fq 'android:windowSplashScreenBackground' android/app/src/main/res/values-v31/styles.xml
             grep -Fq '#FF000000' android/app/src/main/res/values-v31/styles.xml
           fi
-          grep -q 'android:fillColor="#111111"' android/app/src/main/res/drawable/photos_icon.xml
+          grep -q 'android:fillColor="#000000"' android/app/src/main/res/drawable/photos_icon.xml
           grep -q 'android:fillColor="#FFFFFF"' android/app/src/main/res/drawable/photos_icon.xml
+          test -f android/app/src/main/kotlin/com/hyouka/photos/MainActivity.kt
+          grep -Fq 'MediaStore.createDeleteRequest' android/app/src/main/kotlin/com/hyouka/photos/MainActivity.kt
+          grep -Fq 'photos/permanent_delete' lib/photo_library.dart
           python3 -c "import xml.etree.ElementTree as ET; ET.parse('android/app/src/main/res/drawable/photos_icon.xml')"
           if grep -R 'android.permission.INTERNET' android/app/src/main; then
             echo 'Internet permission found; this app is designed to work only with on-device photos.'

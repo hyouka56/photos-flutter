@@ -65,22 +65,54 @@ void main() {
     expect(find.byKey(const Key('photoTile-photo-2')), findsNothing);
   });
 
-  testWidgets('albums open their own photo list', (tester) async {
-    await tester.pumpWidget(
-      PhotosApp(library: library, favoritesStore: favorites),
-    );
+  testWidgets('albums have a readable count and system back returns to albums', (tester) async {
+    await tester.pumpWidget(PhotosApp(library: library, favoritesStore: favorites));
     await tester.pumpAndSettle();
-
     await tester.tap(find.byKey(const Key('albumsTab')));
     await tester.pumpAndSettle();
-
-    expect(find.byKey(const Key('album-camera-roll')), findsOneWidget);
+    expect(find.text('3 albums on this device'), findsOneWidget);
+    expect(find.textContaining('Instance of LibraryAlbum'), findsNothing);
     await tester.tap(find.byKey(const Key('album-camera-roll')));
     await tester.pumpAndSettle();
-
     expect(find.text('Camera Roll'), findsOneWidget);
-    expect(find.byKey(const Key('photoTile-photo-1')), findsOneWidget);
-    expect(find.byKey(const Key('photoTile-photo-2')), findsNothing);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('albumsGrid')), findsOneWidget);
+  });
+
+  testWidgets('long press selects all and deletes photos permanently', (tester) async {
+    await tester.pumpWidget(PhotosApp(library: library, favoritesStore: favorites));
+    await tester.pumpAndSettle();
+    await tester.longPress(find.byKey(const Key('photoTile-photo-1')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('deleteSelectedPhotosButton')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('selectAllPhotosButton')));
+    await tester.pumpAndSettle();
+    expect(find.text('2 selected'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('deleteSelectedPhotosButton')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('confirmDeletePhotosButton')));
+    await tester.pumpAndSettle();
+    expect(library.deletedIds, containsAll(<String>['photo-1', 'photo-2']));
+    expect(favorites.ids, isEmpty);
+    expect(find.byKey(const Key('photoTile-photo-1')), findsNothing);
+  });
+
+  testWidgets('deleting a favorite also deletes it from the device library', (tester) async {
+    await tester.pumpWidget(PhotosApp(library: library, favoritesStore: favorites));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('favorite-photo-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('favoritesTab')));
+    await tester.pumpAndSettle();
+    await tester.longPress(find.byKey(const Key('photoTile-photo-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('deleteSelectedPhotosButton')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('confirmDeletePhotosButton')));
+    await tester.pumpAndSettle();
+    expect(library.deletedIds, contains('photo-1'));
+    expect(favorites.ids, isEmpty);
   });
 }
 
@@ -99,6 +131,7 @@ class MemoryFavoritesStore implements FavoritesStore {
 class FakePhotoLibrary implements PhotoLibrary {
   int requestCount = 0;
   bool accessGranted = true;
+  final Set<String> deletedIds = <String>{};
 
   final _photos = <GalleryPhoto>[
     GalleryPhoto(
@@ -159,6 +192,14 @@ class FakePhotoLibrary implements PhotoLibrary {
     if (start >= source.length) return const <GalleryPhoto>[];
     final end = (start + pageSize).clamp(0, source.length);
     return source.sublist(start, end);
+  }
+
+  @override
+  Future<List<String>> deletePhotos(List<String> ids) async {
+    final found = _photos.where((photo) => ids.contains(photo.id)).map((photo) => photo.id).toList();
+    deletedIds.addAll(found);
+    _photos.removeWhere((photo) => ids.contains(photo.id));
+    return found;
   }
 
   @override
