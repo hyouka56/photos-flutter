@@ -67,17 +67,28 @@ jobs:
       - name: Verify APK architecture
         run: |
           set -euo pipefail
-          APK=build/app/outputs/flutter-apk/app-release.apk
-          test -f "$APK"
-          unzip -l "$APK" | grep -q 'lib/arm64-v8a/'
-          if unzip -l "$APK" | grep -Eq 'lib/(armeabi-v7a|x86|x86_64)/'; then
-            echo 'Unexpected non-arm64 ABI in APK.'
+          APK_DIR=build/app/outputs/flutter-apk
+          APK_COUNT=$(find "$APK_DIR" -maxdepth 1 -type f -name '*.apk' | wc -l)
+          if [ "$APK_COUNT" -ne 1 ]; then
+            echo "Expected exactly one release APK in $APK_DIR; found $APK_COUNT."
+            find "$APK_DIR" -maxdepth 1 -type f -print || true
             exit 1
           fi
+          APK=$(find "$APK_DIR" -maxdepth 1 -type f -name '*.apk' -print -quit)
+          echo "Verified APK path: $APK"
+          echo "APK_PATH=$APK" >> "$GITHUB_ENV"
+          unzip -l "$APK" > apk-contents.txt
+          grep -q 'lib/arm64-v8a/' apk-contents.txt
+          if grep -Eq 'lib/(armeabi-v7a|x86|x86_64)/' apk-contents.txt; then
+            echo 'Unexpected non-arm64 ABI in APK.'
+            grep -E 'lib/(armeabi-v7a|x86|x86_64)/' apk-contents.txt
+            exit 1
+          fi
+          ls -lh "$APK"
 
       - name: Upload APK
         uses: actions/upload-artifact@v6
         with:
           name: photos-apk-arm64-v8a
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: build/app/outputs/flutter-apk/*.apk
           if-no-files-found: error

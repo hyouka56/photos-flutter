@@ -26,7 +26,7 @@ python3 tool/configure_android.py
 flutter build apk --release --target-platform android-arm64
 ```
 
-The APK output is `build/app/outputs/flutter-apk/app-release.apk`. GitHub Actions publishes the APK under the `photos-apk-arm64-v8a` artifact.
+The APK is written under build/app/outputs/flutter-apk/ (Flutter may name a single-ABI build app-arm64-v8a-release.apk). GitHub Actions detects the actual output, verifies that it contains the arm64-v8a ABI only, and publishes it under the photos-apk-arm64-v8a artifact.
 
 ## Privacy
 
