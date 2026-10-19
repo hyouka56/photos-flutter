@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<title>Photos monochrome foreground</title>
+<path d="M260 404Q260 340 324 340H700Q764 340 764 404V646Q764 710 700 710H324Q260 710 260 646Z" fill="#FFFFFF"/>
+<path d="M372 340 420 276H600L650 340Z" fill="#FFFFFF"/>
+<circle cx="512" cy="520" r="126" fill="#111111"/>
+</svg>

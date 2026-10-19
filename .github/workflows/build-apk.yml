@@ -1,0 +1,78 @@
+name: Build Photos APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate Android platform files
+        run: flutter create . --platforms=android --project-name photos --org com.hyouka
+
+      - name: Configure offline photo access and launcher icon
+        run: python3 tool/configure_android.py
+
+      - name: Format Dart source
+        run: |
+          dart format lib test
+          dart format --output=none --set-exit-if-changed lib test
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --fatal-infos
+
+      - name: Test
+        run: flutter test
+
+      - name: Verify manifest, icon, and privacy
+        run: |
+          set -euo pipefail
+          grep -q 'android:label="Photos"' android/app/src/main/AndroidManifest.xml
+          grep -q 'android:icon="@drawable/photos_icon"' android/app/src/main/AndroidManifest.xml
+          grep -q 'android.permission.READ_MEDIA_IMAGES' android/app/src/main/AndroidManifest.xml
+          grep -q 'android.permission.READ_MEDIA_VISUAL_USER_SELECTED' android/app/src/main/AndroidManifest.xml
+          test -f android/app/src/main/res/drawable-nodpi/photos_icon.png
+          file android/app/src/main/res/drawable-nodpi/photos_icon.png | grep -q 'PNG image data, 512 x 512'
+          if grep -R 'android.permission.INTERNET' android/app/src/main; then
+            echo 'Internet permission found; this app is designed to work only with on-device photos.'
+            exit 1
+          fi
+
+      - name: Build release APK (arm64-v8a only)
+        run: flutter build apk --release --target-platform android-arm64
+
+      - name: Verify APK architecture
+        run: |
+          set -euo pipefail
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          test -f "$APK"
+          unzip -l "$APK" | grep -q 'lib/arm64-v8a/'
+          if unzip -l "$APK" | grep -Eq 'lib/(armeabi-v7a|x86|x86_64)/'; then
+            echo 'Unexpected non-arm64 ABI in APK.'
+            exit 1
+          fi
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v6
+        with:
+          name: photos-apk-arm64-v8a
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error

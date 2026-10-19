@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<title>Photos adaptive foreground</title>
+<rect x="260" y="340" width="504" height="370" rx="64" fill="#FFFFFF"/>
+<path d="M372 340 420 276H600L650 340Z" fill="#FFFFFF"/>
+<circle cx="512" cy="520" r="126" fill="#FFFFFF"/>
+<circle cx="512" cy="520" r="68" fill="#111111"/>
+</svg>
