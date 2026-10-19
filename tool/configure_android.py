@@ -89,6 +89,34 @@ def main() -> None:
     else:
         raise SystemExit("Android app Gradle file not found")
 
+    # ABI filters do not consistently exclude native libraries bundled by
+    # transitive plugins, so explicitly exclude incompatible JNI directories.
+    gradle_text = gradle_file.read_text(encoding="utf-8")
+    if "PHOTOS_ARM64_ABI_PACKAGING_EXCLUSIONS" not in gradle_text:
+        if gradle_file.suffix == ".kts":
+            gradle_text += (
+                "\\n\\n// PHOTOS_ARM64_ABI_PACKAGING_EXCLUSIONS\\n"
+                "android {\\n"
+                "    packaging {\\n"
+                "        jniLibs {\\n"
+                '            excludes += setOf("lib/armeabi-v7a/**", "lib/x86/**", "lib/x86_64/**")\\n'
+                "        }\\n"
+                "    }\\n"
+                "}\\n"
+            )
+        else:
+            gradle_text += (
+                "\\n\\n// PHOTOS_ARM64_ABI_PACKAGING_EXCLUSIONS\\n"
+                "android {\\n"
+                "    packaging {\\n"
+                "        jniLibs {\\n"
+                '            excludes += ["lib/armeabi-v7a/**", "lib/x86/**", "lib/x86_64/**"]\\n'
+                "        }\\n"
+                "    }\\n"
+                "}\\n"
+            )
+        gradle_file.write_text(gradle_text, encoding="utf-8")
+
     icon.parent.mkdir(parents=True, exist_ok=True)
     icon.write_text(VECTOR_ICON, encoding="utf-8")
     print("Configured Photos label, offline-only media permissions, native vector launcher icon, and arm64-v8a ABI filter.")
