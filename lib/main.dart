@@ -396,7 +396,7 @@ class _PhotosHomeState extends State<PhotosHome> {
 
   String get _subtitle {
     if (!_hasAccess) return 'Private photo library';
-    if (_selectedTab == 1) return '${_albums.length} albums on this device';
+    if (_selectedTab == 1) return '$_albums.length albums on this device';
     if (_selectedTab == 2) {
       return '${_favoriteIds.length} saved favorites';
     }
@@ -561,7 +561,6 @@ class _PhotosHomeState extends State<PhotosHome> {
       itemBuilder: (context, index) {
         final album = _albums[index];
         return _AlbumTile(
-          key: Key('album-${album.id}'),
           album: album,
           onTap: () => _openAlbum(album),
         );
@@ -637,7 +636,6 @@ class _PhotosHomeState extends State<PhotosHome> {
           }
           final photo = photos[index];
           return _PhotoTile(
-            key: Key('photoTile-${photo.id}'),
             photo: photo,
             isFavorite: _favoriteIds.contains(photo.id),
             onTap: () => _openPhoto(photo),
@@ -985,5 +983,5 @@ String _formatDate(DateTime date) {
   final local = date.toLocal();
   final month = local.month.toString().padLeft(2, '0');
   final day = local.day.toString().padLeft(2, '0');
-  return '${local.year}-${month}-${day}';
+  return '$local.year-$month-$day';
 }

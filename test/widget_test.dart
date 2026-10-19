@@ -79,7 +79,7 @@ class MemoryFavoritesStore implements FavoritesStore {
 class FakePhotoLibrary implements PhotoLibrary {
   int requestCount = 0;
 
-  final _photos = const <GalleryPhoto>[
+  final _photos = <GalleryPhoto>[
     GalleryPhoto(
       id: 'photo-1',
       asset: null,
