@@ -52,8 +52,10 @@ jobs:
           grep -q 'android:icon="@drawable/photos_icon"' android/app/src/main/AndroidManifest.xml
           grep -q 'android.permission.READ_MEDIA_IMAGES' android/app/src/main/AndroidManifest.xml
           grep -q 'android.permission.READ_MEDIA_VISUAL_USER_SELECTED' android/app/src/main/AndroidManifest.xml
-          test -f android/app/src/main/res/drawable-nodpi/photos_icon.png
-          file android/app/src/main/res/drawable-nodpi/photos_icon.png | grep -q 'PNG image data, 512 x 512'
+          test -f android/app/src/main/res/drawable/photos_icon.xml
+          grep -q 'android:fillColor="#111111"' android/app/src/main/res/drawable/photos_icon.xml
+          grep -q 'android:fillColor="#FFFFFF"' android/app/src/main/res/drawable/photos_icon.xml
+          python3 -c "import xml.etree.ElementTree as ET; ET.parse('android/app/src/main/res/drawable/photos_icon.xml')"
           if grep -R 'android.permission.INTERNET' android/app/src/main; then
             echo 'Internet permission found; this app is designed to work only with on-device photos.'
             exit 1
