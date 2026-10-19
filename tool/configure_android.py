@@ -13,8 +13,8 @@ VECTOR_ICON = """<?xml version="1.0" encoding="utf-8"?>
     <path android:fillColor="#111111" android:pathData="M0,0h512v512h-512z" />
     <path android:fillColor="#292929" android:pathData="M142,72h228c54,0 70,16 70,70v228c0,54 -16,70 -70,70h-228c-54,0 -70,-16 -70,-70v-228c0,-54 16,-70 70,-70z" />
     <path android:fillColor="#FFFFFF" android:pathData="M104,176c0,-16 12,-28 28,-28h39l31,-40c5,-7 13,-12 22,-12h64c9,0 17,5 22,12l31,40h39c16,0 28,12 28,28v176c0,16 -12,28 -28,28h-248c-16,0 -28,-12 -28,-28z" />
-    <path android:fillColor="#111111" android:pathData="M256,178a78,78 0,1 0,0 156a78,78 0,1 0,0 -156z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M256,218a38,38 0,1 0,0 76a38,38 0,1 0,0 -76z" />
+    <path android:fillColor="#111111" android:pathData="M178,256a78,78 0,1 0,156 0a78,78 0,1 0,-156 0z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M218,256a38,38 0,1 0,76 0a38,38 0,1 0,-76 0z" />
 </vector>
 """
 
@@ -36,7 +36,7 @@ def main() -> None:
     )
     text = re.sub(r'android:label="[^"]+"', 'android:label="Photos"', text, count=1)
     text = re.sub(
-        r'android:icon="[^"]+',
+        r'android:icon="[^"]+"',
         'android:icon="@drawable/photos_icon"',
         text,
         count=1,
