@@ -39,8 +39,6 @@ void main() {
     final identity = Matrix4.identity();
     expect(controller.value.storage, equals(identity.storage));
 
-    final focalPoint = const Offset(300, 240);
-    final scenePointBefore = controller.toScene(focalPoint);
     final firstFinger =
         await tester.startGesture(const Offset(270, 240), pointer: 1);
     final secondFinger =
@@ -48,10 +46,13 @@ void main() {
     await tester.pump();
     await firstFinger.moveTo(const Offset(240, 240));
     await tester.pump(const Duration(milliseconds: 20));
+    // The scale recognizer starts when this first move crosses touch slop;
+    // its active focal point is therefore the midpoint at x=285.
+    final scenePointBefore = controller.toScene(const Offset(285, 240));
     await secondFinger.moveTo(const Offset(360, 240));
     await tester.pump(const Duration(milliseconds: 20));
 
-    final scenePointAfter = controller.toScene(focalPoint);
+    final scenePointAfter = controller.toScene(const Offset(300, 240));
     expect(scenePointAfter.dx, closeTo(scenePointBefore.dx, 1.0));
     expect(scenePointAfter.dy, closeTo(scenePointBefore.dy, 1.0));
     expect(controller.value.getMaxScaleOnAxis(), greaterThan(1.1));
