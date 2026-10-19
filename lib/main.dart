@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:photo_manager_image_provider/photo_manager_image_provider.dart';
@@ -138,8 +140,20 @@ class _PhotosHomeState extends State<PhotosHome> {
     });
 
     try {
-      final savedFavorites = await widget.favoritesStore.load();
+      // Ask the OS first so a storage/preferences failure cannot suppress the
+      // first-run photo permission prompt.
       final hasAccess = await widget.library.requestAccess();
+      Set<String> savedFavorites = <String>{};
+      try {
+        savedFavorites = await widget.favoritesStore.load();
+      } catch (error, stackTrace) {
+        developer.log(
+          'Could not read saved favorites; continuing without them.',
+          name: 'photos.favorites',
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
 
       if (!mounted) return;
 
@@ -186,11 +200,19 @@ class _PhotosHomeState extends State<PhotosHome> {
         _hasMore = photos.length == _pageSize;
         _loading = false;
       });
-    } catch (_) {
+    } catch (error, stackTrace) {
+      developer.log(
+        'Could not initialize the local photo library.',
+        name: 'photos.library',
+        error: error,
+        stackTrace: stackTrace,
+      );
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = 'We couldn’t load your photo library. Please try again.';
+        _error =
+            'Android could not read your photo library (${error.runtimeType}). '
+            'Check Photos and videos access in system settings, then pull down to retry.';
       });
     }
   }
@@ -205,8 +227,68 @@ class _PhotosHomeState extends State<PhotosHome> {
   }
 
   Future<void> _refresh() async {
-    if (!_hasAccess) {
+    if (!_hasAccess || _permissionNeeded) {
       await _start();
+      return;
+    }
+
+    if (_selectedTab == 1) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+      try {
+        final albums = await widget.library.getAlbums();
+        if (!mounted) return;
+        setState(() {
+          _albums = albums;
+          _loading = false;
+        });
+      } catch (error, stackTrace) {
+        developer.log(
+          'Could not refresh albums.',
+          name: 'photos.library',
+          error: error,
+          stackTrace: stackTrace,
+        );
+        if (!mounted) return;
+        setState(() {
+          _loading = false;
+          _error = 'Could not refresh albums (${error.runtimeType}). Pull down to retry.';
+        });
+      }
+      return;
+    }
+
+    if (_selectedTab == 2) {
+      setState(() {
+        _loadingFavorites = true;
+        _error = null;
+      });
+      try {
+        // Refresh album handles before resolving saved asset IDs. This also
+        // picks up permission changes and newly added/removed device photos.
+        await widget.library.getAlbums();
+        final favorites = await widget.library.findPhotosByIds(_favoriteIds);
+        if (!mounted) return;
+        setState(() {
+          _favoritePhotos = favorites;
+          _favoritesLoaded = true;
+          _loadingFavorites = false;
+        });
+      } catch (error, stackTrace) {
+        developer.log(
+          'Could not refresh favorite photos.',
+          name: 'photos.favorites',
+          error: error,
+          stackTrace: stackTrace,
+        );
+        if (!mounted) return;
+        setState(() {
+          _loadingFavorites = false;
+          _error = 'Could not refresh favorites (${error.runtimeType}). Pull down to retry.';
+        });
+      }
       return;
     }
 
@@ -239,11 +321,19 @@ class _PhotosHomeState extends State<PhotosHome> {
         _hasMore = photos.length == _pageSize;
         _loading = false;
       });
-    } catch (_) {
+    } catch (error, stackTrace) {
+      developer.log(
+        'Could not refresh the photo library.',
+        name: 'photos.library',
+        error: error,
+        stackTrace: stackTrace,
+      );
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = 'Refresh failed. Please try again.';
+        _error =
+            'Could not refresh photos (${error.runtimeType}). '
+            'Check the app’s photo permissions, then pull down to retry.';
       });
     }
   }
@@ -462,16 +552,18 @@ class _PhotosHomeState extends State<PhotosHome> {
                       ],
                     ),
                   ),
-                  IconButton(
-                    key: const Key('refreshLibrary'),
-                    tooltip: 'Refresh photos',
-                    onPressed: _refresh,
-                    icon: const Icon(Icons.refresh_rounded),
-                  ),
                 ],
               ),
             ),
-            Expanded(child: _buildContent()),
+            Expanded(
+              child: RefreshIndicator(
+                key: const Key('pullToRefresh'),
+                onRefresh: _refresh,
+                color: Colors.white,
+                backgroundColor: const Color(0xFF202020),
+                child: _buildContent(),
+              ),
+            ),
           ],
         ),
       ),
@@ -518,6 +610,8 @@ class _PhotosHomeState extends State<PhotosHome> {
         message: _error!,
         actionLabel: 'Try again',
         onAction: _start,
+        secondaryLabel: 'Open settings',
+        onSecondary: _openSettings,
       );
     }
 
@@ -550,6 +644,7 @@ class _PhotosHomeState extends State<PhotosHome> {
 
     return GridView.builder(
       key: const Key('albumsGrid'),
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(14, 8, 14, 20),
       itemCount: _albums.length,
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -610,13 +705,15 @@ class _PhotosHomeState extends State<PhotosHome> {
 
     return NotificationListener<ScrollNotification>(
       onNotification: (notification) {
-        if (notification.metrics.extentAfter < 700) {
+        if (notification is ScrollUpdateNotification &&
+            notification.metrics.extentAfter < 700) {
           _loadMore();
         }
         return false;
       },
       child: GridView.builder(
         key: Key(favoritesMode ? 'favoritesGrid' : 'photosGrid'),
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(4, 2, 4, 8),
         itemCount: photos.length + (!favoritesMode && _loadingMore ? 1 : 0),
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -673,6 +770,7 @@ class _MessageState extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(28),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 360),

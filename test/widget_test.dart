@@ -12,6 +12,24 @@ void main() {
     favorites = MemoryFavoritesStore();
   });
 
+  testWidgets('asks for photo access and retries after access is granted', (tester) async {
+    library.accessGranted = false;
+    await tester.pumpWidget(
+      PhotosApp(library: library, favoritesStore: favorites),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Allow photo access'), findsOneWidget);
+    expect(find.byKey(const Key('photosGrid')), findsNothing);
+
+    library.accessGranted = true;
+    await tester.tap(find.text('Allow photo access'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('photosGrid')), findsOneWidget);
+    expect(library.requestCount, 2);
+  });
+
   testWidgets('shows the local photo grid and bottom navigation', (tester) async {
     await tester.pumpWidget(
       PhotosApp(library: library, favoritesStore: favorites),
@@ -19,6 +37,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('photosGrid')), findsOneWidget);
+    expect(find.byKey(const Key('pullToRefresh')), findsOneWidget);
+    expect(find.byKey(const Key('refreshLibrary')), findsNothing);
     expect(find.byKey(const Key('photoTile-photo-1')), findsOneWidget);
     expect(find.byKey(const Key('photoTile-photo-2')), findsOneWidget);
     expect(find.byKey(const Key('albumsTab')), findsOneWidget);
@@ -78,6 +98,7 @@ class MemoryFavoritesStore implements FavoritesStore {
 
 class FakePhotoLibrary implements PhotoLibrary {
   int requestCount = 0;
+  bool accessGranted = true;
 
   final _photos = <GalleryPhoto>[
     GalleryPhoto(
@@ -114,7 +135,7 @@ class FakePhotoLibrary implements PhotoLibrary {
   @override
   Future<bool> requestAccess() async {
     requestCount++;
-    return true;
+    return accessGranted;
   }
 
   @override

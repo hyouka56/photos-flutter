@@ -64,6 +64,7 @@ class PhotoManagerLibrary implements PhotoLibrary {
   @override
   Future<List<LibraryAlbum>> getAlbums() async {
     final allPaths = await PhotoManager.getAssetPathList(
+      hasAll: true,
       onlyAll: true,
       type: RequestType.image,
     );

@@ -1,11 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-<title>Photos app icon</title>
-<desc>Flutter Foundry camera concept. Dark background with a white camera body and dark lens.</desc>
-<rect width="1024" height="1024" fill="#111111"/>
-<rect x="142" y="142" width="740" height="740" rx="218" fill="#FFFFFF" opacity="0.16"/>
-<rect x="260" y="340" width="504" height="370" rx="64" fill="#FFFFFF"/>
-<path d="M372 340 420 276H600L650 340Z" fill="#FFFFFF"/>
-<circle cx="512" cy="520" r="126" fill="#FFFFFF"/>
-<circle cx="512" cy="520" r="68" fill="#111111"/>
+  <title>Photos app icon</title>
+  <desc>Pure black background with a centered white photo frame, sun, and mountain silhouette.</desc>
+  <rect width="1024" height="1024" fill="#000000"/>
+  <path d="M272 220h480a52 52 0 0 1 52 52v480a52 52 0 0 1-52 52H272a52 52 0 0 1-52-52V272a52 52 0 0 1 52-52z" fill="#FFFFFF"/>
+  <rect x="304" y="272" width="416" height="424" fill="#000000"/>
+  <circle cx="620" cy="360" r="38" fill="#FFFFFF"/>
+  <path d="M340 650 450 500l82 95 74-78 86 133z" fill="#FFFFFF"/>
 </svg>

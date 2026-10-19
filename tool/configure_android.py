@@ -11,12 +11,67 @@ VECTOR_ICON = """<?xml version="1.0" encoding="utf-8"?>
     android:viewportWidth="512"
     android:viewportHeight="512">
     <path android:fillColor="#111111" android:pathData="M0,0h512v512h-512z" />
-    <path android:fillColor="#292929" android:pathData="M142,72h228c54,0 70,16 70,70v228c0,54 -16,70 -70,70h-228c-54,0 -70,-16 -70,-70v-228c0,-54 16,-70 70,-70z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M104,176c0,-16 12,-28 28,-28h39l31,-40c5,-7 13,-12 22,-12h64c9,0 17,5 22,12l31,40h39c16,0 28,12 28,28v176c0,16 -12,28 -28,28h-248c-16,0 -28,-12 -28,-28z" />
-    <path android:fillColor="#111111" android:pathData="M178,256a78,78 0,1 0,156 0a78,78 0,1 0,-156 0z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M218,256a38,38 0,1 0,76 0a38,38 0,1 0,-76 0z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M96,112c0,-18 14,-32 32,-32h256c18,0 32,14 32,32v288c0,18 -14,32 -32,32h-256c-18,0 -32,-14 -32,-32z" />
+    <path android:fillColor="#111111" android:pathData="M128,144h256v224h-256z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M308,178a26,26 0,1 0,52 0a26,26 0,1 0,-52 0z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M152,336l62,-78 46,53 38,-42 42,67z" />
 </vector>
 """
+
+def _set_style_item(xml_text: str, style_name: str, item_name: str, value: str) -> str:
+    style_re = re.compile(
+        r'(<style\b[^>]*\bname="' + re.escape(style_name)
+        + r'"[^>]*>)(.*?)(</style>)', flags=re.DOTALL
+    )
+    match = style_re.search(xml_text)
+    if not match:
+        return xml_text
+    opening, body, closing = match.group(1), match.group(2), match.group(3)
+    item_re = re.compile(
+        r'<item\s+name="' + re.escape(item_name) + r'">.*?</item>',
+        flags=re.DOTALL,
+    )
+    item = f'<item name="{item_name}">{value}</item>'
+    if item_re.search(body):
+        body = item_re.sub(item, body, count=1)
+    else:
+        body = body.rstrip() + f'\n        {item}\n    '
+    return xml_text[:match.start()] + opening + body + closing + xml_text[match.end():]
+
+
+def configure_dark_launch_screen(root: Path) -> None:
+    resources = root / "android" / "app" / "src" / "main" / "res"
+    launch_background = resources / "drawable" / "launch_background.xml"
+    launch_background.parent.mkdir(parents=True, exist_ok=True)
+    launch_background.write_text(
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        '<layer-list xmlns:android="http://schemas.android.com/apk/res/android">\n'
+        '    <item android:drawable="#FF000000" />\n'
+        '</layer-list>\n', encoding="utf-8"
+    )
+
+    for styles_file in resources.rglob("*.xml"):
+        if not styles_file.parent.name.startswith("values") or styles_file.name not in {"styles.xml", "themes.xml"}:
+            continue
+        xml_text = styles_file.read_text(encoding="utf-8")
+        if not re.search(r'<style\b[^>]*\bname="LaunchTheme"', xml_text):
+            continue
+        for style_name in ("LaunchTheme", "NormalTheme"):
+            if not re.search(r'<style\b[^>]*\bname="' + re.escape(style_name) + r'"', xml_text):
+                continue
+            background = "@drawable/launch_background" if style_name == "LaunchTheme" else "#FF000000"
+            for item_name, value in (
+                ("android:windowBackground", background),
+                ("android:statusBarColor", "#FF000000"),
+                ("android:navigationBarColor", "#FF000000"),
+                ("android:windowLightStatusBar", "false"),
+            ):
+                xml_text = _set_style_item(xml_text, style_name, item_name, value)
+            if style_name == "LaunchTheme" and styles_file.parent.name in {"values-v31", "values-night-v31"}:
+                xml_text = _set_style_item(xml_text, style_name, "android:windowSplashScreenBackground", "#FF000000")
+                xml_text = _set_style_item(xml_text, style_name, "android:windowSplashScreenAnimatedIcon", "@drawable/photos_icon")
+        styles_file.write_text(xml_text, encoding="utf-8")
+
 
 
 def main() -> None:
@@ -47,6 +102,7 @@ def main() -> None:
     permissions = (
         '<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />',
         '<uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />',
+        '<uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />',
         '<uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />',
     )
     for permission in permissions:
@@ -119,7 +175,8 @@ def main() -> None:
 
     icon.parent.mkdir(parents=True, exist_ok=True)
     icon.write_text(VECTOR_ICON, encoding="utf-8")
-    print("Configured Photos label, offline-only media permissions, native vector launcher icon, and arm64-v8a ABI filter.")
+    configure_dark_launch_screen(root)
+    print("Configured Photos label, Android media permissions, photo launcher icon, dark launch screen, and arm64-v8a ABI filter.")
     print(f"Launcher icon: {icon}")
     print(f"Android Gradle config: {gradle_file}")
 
