@@ -38,7 +38,7 @@ void main() {
     final identity = controller.value.clone();
     expect(controller.value.getMaxScaleOnAxis(), 1);
 
-    controller.value = controller.value.clone()..scale(3.0);
+    controller.value = controller.value.clone()..scaleByDouble(3.0, 3.0, 1.0);
     await tester.pump();
     expect(find.byKey(const Key('resetZoomButton')), findsOneWidget);
 
@@ -47,7 +47,7 @@ void main() {
     expect(controller.value.storage, equals(identity.storage));
     expect(find.byKey(const Key('resetZoomButton')), findsNothing);
 
-    controller.value = controller.value.clone()..scale(2.0);
+    controller.value = controller.value.clone()..scaleByDouble(2.0, 2.0, 1.0);
     await tester.pump();
     await tester.tapAt(const Offset(80, 80));
     await tester.pump(const Duration(milliseconds: 50));
