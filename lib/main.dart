@@ -401,7 +401,7 @@ class _PhotosHomeState extends State<PhotosHome> {
       return '${_favoriteIds.length} saved favorites';
     }
     final count = _activeAlbum.count;
-    return count == 1 ? '1 photo on this device' : '${count} photos on this device';
+    return count == 1 ? '1 photo on this device' : '$count photos on this device';
   }
 
   @override
@@ -732,7 +732,6 @@ class _MessageState extends StatelessWidget {
 
 class _PhotoTile extends StatelessWidget {
   const _PhotoTile({
-    super.key,
     required this.photo,
     required this.isFavorite,
     required this.onTap,
@@ -839,7 +838,6 @@ class _PhotoPlaceholder extends StatelessWidget {
 
 class _AlbumTile extends StatelessWidget {
   const _AlbumTile({
-    super.key,
     required this.album,
     required this.onTap,
   });
