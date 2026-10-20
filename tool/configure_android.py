@@ -72,6 +72,25 @@ def configure_dark_launch_screen(root: Path) -> None:
 
 
 
+def disable_duplicate_gradle_file_watching(root: Path) -> None:
+    """Avoid a duplicate-path VFS watcher exception in generated CI projects."""
+    properties = root / "android" / "gradle.properties"
+    if not properties.is_file():
+        raise SystemExit(f"Android Gradle properties not found: {properties}")
+
+    text = properties.read_text(encoding="utf-8")
+    setting = re.compile(r"(?m)^\s*org\.gradle\.vfs\.watch\s*=.*$")
+    configured = "org.gradle.vfs.watch=false"
+    if setting.search(text):
+        text = setting.sub(configured, text, count=1)
+    else:
+        text = text.rstrip() + (
+            "\n\n# Avoid duplicate Android-root filesystem watchers on CI.\n"
+            + configured + "\n"
+        )
+    properties.write_text(text, encoding="utf-8")
+
+
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
     manifest = root / "android" / "app" / "src" / "main" / "AndroidManifest.xml"
@@ -309,7 +328,8 @@ class MainActivity : FlutterActivity() {
     icon.parent.mkdir(parents=True, exist_ok=True)
     icon.write_text(VECTOR_ICON, encoding="utf-8")
     configure_dark_launch_screen(root)
-    print("Configured Photos label, Android media permissions, immersive photo-viewer system UI, borderless sun-and-mountain icon, permanent media deletion request, dark launch screen, and arm64-v8a ABI filter.")
+    disable_duplicate_gradle_file_watching(root)
+    print("Configured Photos label, Android media permissions, immersive photo-viewer system UI, borderless sun-and-mountain icon, permanent media deletion request, dark launch screen, duplicate-watcher workaround, and arm64-v8a ABI filter.")
     print(f"Launcher icon: {icon}")
     print(f"Android Gradle config: {gradle_file}")
 
