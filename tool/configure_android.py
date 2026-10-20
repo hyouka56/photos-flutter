@@ -72,24 +72,50 @@ def configure_dark_launch_screen(root: Path) -> None:
 
 
 
-def disable_duplicate_gradle_file_watching(root: Path) -> None:
-    """Avoid a duplicate-path VFS watcher exception in generated CI projects."""
-    properties = root / "android" / "gradle.properties"
+def configure_android_gradle_properties(root: Path) -> None:
+    """Disable duplicate VFS watchers and use AGP's built-in Kotlin support."""
+    android = root / "android"
+    properties = android / "gradle.properties"
+    settings = android / "settings.gradle.kts"
+    app_gradle = android / "app" / "build.gradle.kts"
     if not properties.is_file():
         raise SystemExit(f"Android Gradle properties not found: {properties}")
+    if not settings.is_file() or not app_gradle.is_file():
+        raise SystemExit("Flutter 3.47+ Kotlin DSL Android templates are required for built-in Kotlin")
+
+    settings_text = settings.read_text(encoding="utf-8")
+    agp_match = re.search(
+        r'id\(\s*["\']com\.android\.application["\']\s*\)\s*version\s*["\'](\d+(?:\.\d+)+)["\']',
+        settings_text,
+    )
+    if not agp_match or int(agp_match.group(1).split(".")[0]) < 9:
+        version = agp_match.group(1) if agp_match else "not detected"
+        raise SystemExit(f"Built-in Kotlin requires Android Gradle Plugin 9+; detected {version}")
+
+    app_text = app_gradle.read_text(encoding="utf-8")
+    if re.search(
+        r'(?m)^\s*id\(\s*["\'](?:kotlin-android|org\.jetbrains\.kotlin\.android)["\']\s*\)',
+        app_text,
+    ):
+        raise SystemExit("Android app still applies the Kotlin Gradle Plugin; migrate app/build.gradle.kts first")
+    if not re.search(r"kotlin\s*\{\s*compilerOptions\s*\{", app_text, flags=re.DOTALL):
+        raise SystemExit("Android app is missing the built-in Kotlin compilerOptions block")
 
     text = properties.read_text(encoding="utf-8")
-    setting = re.compile(r"(?m)^\s*org\.gradle\.vfs\.watch\s*=.*$")
-    configured = "org.gradle.vfs.watch=false"
-    if setting.search(text):
-        text = setting.sub(configured, text, count=1)
-    else:
-        text = text.rstrip() + (
-            "\n\n# Avoid duplicate Android-root filesystem watchers on CI.\n"
-            + configured + "\n"
-        )
+    settings_to_apply = (
+        (r"(?m)^\s*org\.gradle\.vfs\.watch\s*=.*$", "org.gradle.vfs.watch=false",
+         "# Avoid duplicate Android-root filesystem watchers on CI."),
+        (r"(?m)^\s*android\.builtInKotlin\s*=.*$", "android.builtInKotlin=true",
+         "# Use AGP 9 built-in Kotlin; supported by this Flutter template and photo_manager."),
+    )
+    for expression, configured, comment in settings_to_apply:
+        setting = re.compile(expression)
+        if setting.search(text):
+            text = setting.sub(configured, text, count=1)
+        else:
+            text = text.rstrip() + f"\n\n{comment}\n{configured}\n"
     properties.write_text(text, encoding="utf-8")
-
+    print(f"Built-in Kotlin enabled (Android Gradle Plugin {agp_match.group(1)}).")
 
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
@@ -328,7 +354,7 @@ class MainActivity : FlutterActivity() {
     icon.parent.mkdir(parents=True, exist_ok=True)
     icon.write_text(VECTOR_ICON, encoding="utf-8")
     configure_dark_launch_screen(root)
-    disable_duplicate_gradle_file_watching(root)
+    configure_android_gradle_properties(root)
     print("Configured Photos label, Android media permissions, immersive photo-viewer system UI, borderless sun-and-mountain icon, permanent media deletion request, dark launch screen, duplicate-watcher workaround, and arm64-v8a ABI filter.")
     print(f"Launcher icon: {icon}")
     print(f"Android Gradle config: {gradle_file}")
