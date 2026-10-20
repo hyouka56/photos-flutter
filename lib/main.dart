@@ -883,7 +883,11 @@ class _PhotoTile extends StatelessWidget {
         child: Stack(fit: StackFit.expand, children: [
           if (photo.asset != null)
             Image(image: AssetEntityImageProvider(photo.asset!, isOriginal: false,
-              thumbnailSize: const ThumbnailSize.square(420)), fit: BoxFit.cover, gaplessPlayback: true,
+              thumbnailSize: const ThumbnailSize.square(420)),
+              semanticLabel: photo.createdAt == null
+                  ? 'Photo thumbnail'
+                  : 'Photo taken ${_formatDate(photo.createdAt!)}',
+              fit: BoxFit.cover, gaplessPlayback: true,
               errorBuilder: (context, error, stackTrace) => const _PhotoPlaceholder())
           else const _PhotoPlaceholder(),
           if (selectionMode)
@@ -1063,7 +1067,15 @@ class _ZoomableImageCanvasState extends State<ZoomableImageCanvas> {
         GestureDetector(
           behavior: HitTestBehavior.opaque,
           onDoubleTap: _resetZoom,
-          child: InteractiveViewer(
+          child: Semantics(
+            container: true,
+            explicitChildNodes: true,
+            label: 'Photo zoom area',
+            hint: 'Pinch to zoom. Double tap to reset zoom.',
+            customSemanticsActions: {
+              CustomSemanticsAction(label: 'Reset zoom'): _resetZoom,
+            },
+            child: InteractiveViewer(
             key: widget.key == null
               ? const Key('photoZoomViewer')
               : ValueKey<String>('photoZoomViewer-${widget.key}'),
@@ -1076,6 +1088,7 @@ class _ZoomableImageCanvasState extends State<ZoomableImageCanvas> {
             // Null alignment keeps focal calculations and rendering on the
             // same top-left transform origin.
             child: SizedBox.expand(child: widget.child),
+            ),
           ),
         ),
       ],
@@ -1256,7 +1269,12 @@ class _PhotoViewerState extends State<PhotoViewer> {
             GestureDetector(
               behavior: HitTestBehavior.translucent,
               onTap: _handleTap,
-              child: PageView.builder(
+              child: Semantics(
+                container: true,
+                explicitChildNodes: true,
+                label: 'Photo viewer',
+                hint: 'Tap to show or hide controls. Swipe horizontally to change photos. Pinch to zoom.',
+                child: PageView.builder(
               controller: _pageController,
               physics: const NeverScrollableScrollPhysics(),
               itemCount: widget.photos.length,
@@ -1279,6 +1297,9 @@ class _PhotoViewerState extends State<PhotoViewer> {
                       isOriginal: false,
                       thumbnailSize: const ThumbnailSize.square(2400),
                     ),
+                    semanticLabel: title == 'Photo'
+                        ? 'Full-screen photo'
+                        : 'Full-screen photo taken on $title',
                     fit: BoxFit.contain,
                     alignment: Alignment.center,
                     gaplessPlayback: true,
@@ -1287,6 +1308,7 @@ class _PhotoViewerState extends State<PhotoViewer> {
                   ),
                 );
               },
+            ),
             ),
             ),
             if (_controlsVisible)
