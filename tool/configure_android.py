@@ -91,17 +91,35 @@ import android.content.ContentUris
 import android.content.Intent
 import android.os.Build
 import android.provider.MediaStore
+import android.view.View
+import android.view.WindowInsets
+import android.view.WindowInsetsController
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private val channelName = "photos/permanent_delete"
+    private val systemUiChannelName = "photos/system_ui"
     private var pendingDeleteResult: MethodChannel.Result? = null
     private var pendingDeleteIds: List<String> = emptyList()
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, systemUiChannelName)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "immersive" -> {
+                        setImmersiveSystemUi(true)
+                        result.success(null)
+                    }
+                    "edgeToEdge" -> {
+                        setImmersiveSystemUi(false)
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, result ->
                 if (call.method != "deleteImagesPermanently") {
@@ -140,6 +158,35 @@ class MainActivity : FlutterActivity() {
                     result.error("DELETE_REQUEST_FAILED", error.message ?: "Could not request media deletion.", null)
                 }
             }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun setImmersiveSystemUi(immersive: Boolean) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val controller = window.insetsController ?: return
+            val systemBars = WindowInsets.Type.statusBars() or
+                WindowInsets.Type.navigationBars()
+            controller.systemBarsBehavior =
+                WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            if (immersive) {
+                controller.hide(systemBars)
+            } else {
+                controller.show(systemBars)
+            }
+        } else {
+            window.decorView.systemUiVisibility = if (immersive) {
+                (View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    or View.SYSTEM_UI_FLAG_FULLSCREEN
+                    or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN)
+            } else {
+                (View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN)
+            }
+        }
     }
 
     @Deprecated("Deprecated by Android, kept for Flutter's activity-result callback compatibility")
@@ -262,7 +309,7 @@ class MainActivity : FlutterActivity() {
     icon.parent.mkdir(parents=True, exist_ok=True)
     icon.write_text(VECTOR_ICON, encoding="utf-8")
     configure_dark_launch_screen(root)
-    print("Configured Photos label, Android media permissions, borderless sun-and-mountain icon, permanent media deletion request, dark launch screen, and arm64-v8a ABI filter.")
+    print("Configured Photos label, Android media permissions, immersive photo-viewer system UI, borderless sun-and-mountain icon, permanent media deletion request, dark launch screen, and arm64-v8a ABI filter.")
     print(f"Launcher icon: {icon}")
     print(f"Android Gradle config: {gradle_file}")
 

@@ -48,7 +48,6 @@ abstract interface class PhotoLibrary {
     required int page,
     required int pageSize,
   });
-  Future<List<GalleryPhoto>> findPhotosByIds(Set<String> ids);
   Future<List<String>> deletePhotos(List<String> ids);
 }
 
@@ -152,37 +151,5 @@ class PhotoManagerLibrary implements PhotoLibrary {
     return PhotoManager.editor.deleteWithIds(ids);
   }
 
-  @override
-  Future<List<GalleryPhoto>> findPhotosByIds(Set<String> ids) async {
-    if (ids.isEmpty) return const <GalleryPhoto>[];
-    if (_allPath == null) await getAlbums();
 
-    final path = _allPath;
-    if (path == null) return const <GalleryPhoto>[];
-
-    final assetCount = await path.assetCountAsync;
-    final pageCount = (assetCount / 80).ceil();
-    final found = <String, GalleryPhoto>{};
-
-    for (var page = 0; page < pageCount; page++) {
-      final assets = await path.getAssetListPaged(page: page, size: 80);
-      if (assets.isEmpty) break;
-
-      for (final asset in assets) {
-        if (ids.contains(asset.id)) {
-          found[asset.id] = GalleryPhoto.fromAsset(asset);
-        }
-      }
-
-      if (found.length == ids.length) break;
-    }
-
-    final photos = found.values.toList()
-      ..sort((a, b) {
-        final aDate = a.createdAt ?? DateTime(1970);
-        final bDate = b.createdAt ?? DateTime(1970);
-        return bDate.compareTo(aDate);
-      });
-    return photos;
-  }
 }

@@ -1,9 +1,10 @@
+import 'dart:async';
 import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:photo_manager_image_provider/photo_manager_image_provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'photo_library.dart';
 
@@ -13,14 +14,9 @@ Future<void> main() async {
 }
 
 class PhotosApp extends StatelessWidget {
-  const PhotosApp({
-    super.key,
-    this.library,
-    this.favoritesStore,
-  });
+  const PhotosApp({super.key, this.library});
 
   final PhotoLibrary? library;
-  final FavoritesStore? favoritesStore;
 
   @override
   Widget build(BuildContext context) {
@@ -57,44 +53,15 @@ class PhotosApp extends StatelessWidget {
           ),
         ),
       ),
-      home: PhotosHome(
-        library: library ?? PhotoManagerLibrary(),
-        favoritesStore: favoritesStore ?? SharedPreferencesFavoritesStore(),
-      ),
+      home: PhotosHome(library: library ?? PhotoManagerLibrary()),
     );
   }
 }
 
-abstract interface class FavoritesStore {
-  Future<Set<String>> load();
-  Future<void> save(Set<String> ids);
-}
-
-class SharedPreferencesFavoritesStore implements FavoritesStore {
-  static const _key = 'photos.favorite.asset.ids';
-
-  @override
-  Future<Set<String>> load() async {
-    final preferences = await SharedPreferences.getInstance();
-    return (preferences.getStringList(_key) ?? const <String>[]).toSet();
-  }
-
-  @override
-  Future<void> save(Set<String> ids) async {
-    final preferences = await SharedPreferences.getInstance();
-    await preferences.setStringList(_key, ids.toList()..sort());
-  }
-}
-
 class PhotosHome extends StatefulWidget {
-  const PhotosHome({
-    super.key,
-    required this.library,
-    required this.favoritesStore,
-  });
+  const PhotosHome({super.key, required this.library});
 
   final PhotoLibrary library;
-  final FavoritesStore favoritesStore;
 
   @override
   State<PhotosHome> createState() => _PhotosHomeState();
@@ -105,8 +72,6 @@ class _PhotosHomeState extends State<PhotosHome> {
 
   bool _loading = true;
   bool _loadingMore = false;
-  bool _loadingFavorites = false;
-  bool _favoritesLoaded = false;
   bool _hasAccess = false;
   bool _permissionNeeded = false;
   bool _hasMore = false;
@@ -143,8 +108,6 @@ class _PhotosHomeState extends State<PhotosHome> {
     isAll: true,
   );
   List<GalleryPhoto> _photos = const [];
-  List<GalleryPhoto> _favoritePhotos = const [];
-  Set<String> _favoriteIds = <String>{};
 
   @override
   void initState() {
@@ -160,28 +123,8 @@ class _PhotosHomeState extends State<PhotosHome> {
     });
 
     try {
-      // Ask the OS first so a storage/preferences failure cannot suppress the
-      // first-run photo permission prompt.
       final hasAccess = await widget.library.requestAccess();
-      Set<String> savedFavorites = <String>{};
-      try {
-        savedFavorites = await widget.favoritesStore.load();
-      } catch (error, stackTrace) {
-        developer.log(
-          'Could not read saved favorites; continuing without them.',
-          name: 'photos.favorites',
-          error: error,
-          stackTrace: stackTrace,
-        );
-      }
-
       if (!mounted) return;
-
-      setState(() {
-        _favoriteIds = savedFavorites;
-        _favoritesLoaded = false;
-        _favoritePhotos = const [];
-      });
 
       if (!hasAccess) {
         setState(() {
@@ -275,38 +218,6 @@ class _PhotosHomeState extends State<PhotosHome> {
         setState(() {
           _loading = false;
           _error = 'Could not refresh albums (${error.runtimeType}). Pull down to retry.';
-        });
-      }
-      return;
-    }
-
-    if (_selectedTab == 2) {
-      setState(() {
-        _loadingFavorites = true;
-        _error = null;
-      });
-      try {
-        // Refresh album handles before resolving saved asset IDs. This also
-        // picks up permission changes and newly added/removed device photos.
-        await widget.library.getAlbums();
-        final favorites = await widget.library.findPhotosByIds(_favoriteIds);
-        if (!mounted) return;
-        setState(() {
-          _favoritePhotos = favorites;
-          _favoritesLoaded = true;
-          _loadingFavorites = false;
-        });
-      } catch (error, stackTrace) {
-        developer.log(
-          'Could not refresh favorite photos.',
-          name: 'photos.favorites',
-          error: error,
-          stackTrace: stackTrace,
-        );
-        if (!mounted) return;
-        setState(() {
-          _loadingFavorites = false;
-          _error = 'Could not refresh favorites (${error.runtimeType}). Pull down to retry.';
         });
       }
       return;
@@ -445,7 +356,6 @@ class _PhotosHomeState extends State<PhotosHome> {
       }
     });
     if (leavingAlbum && index == 0) await _refresh();
-    if (index == 2 && !_favoritesLoaded) await _loadFavorites();
   }
 
   Future<void> _handleSystemBack() async {
@@ -490,7 +400,6 @@ class _PhotosHomeState extends State<PhotosHome> {
   }
 
   Future<List<GalleryPhoto>> _loadAllPhotosInCurrentScope() async {
-    if (_selectedTab == 2) return List<GalleryPhoto>.from(_favoritePhotos);
     final result = <GalleryPhoto>[];
     var page = 0;
     while (true) {
@@ -583,17 +492,9 @@ class _PhotosHomeState extends State<PhotosHome> {
       return;
     }
 
-    final nextFavoriteIds = Set<String>.from(_favoriteIds)..removeAll(deletedIds);
-    try {
-      await widget.favoritesStore.save(nextFavoriteIds);
-    } catch (error, stackTrace) {
-      developer.log('Could not persist favorites after deletion.', name: 'photos.favorites', error: error, stackTrace: stackTrace);
-    }
-
     var refreshedAlbums = _albums;
     var refreshedAlbum = _activeAlbum;
     var refreshedPhotos = _photos.where((photo) => !deletedIds.contains(photo.id)).toList();
-    var refreshedFavorites = _favoritePhotos.where((photo) => !deletedIds.contains(photo.id)).toList();
     try {
       refreshedAlbums = await widget.library.getAlbums();
       refreshedAlbum = refreshedAlbums.firstWhere(
@@ -603,7 +504,6 @@ class _PhotosHomeState extends State<PhotosHome> {
       if (_selectedTab == 0) {
         refreshedPhotos = await widget.library.getPhotos(albumId: refreshedAlbum.id, page: 0, pageSize: _pageSize);
       }
-      refreshedFavorites = await widget.library.findPhotosByIds(nextFavoriteIds);
     } catch (error, stackTrace) {
       developer.log('Could not fully refresh library after deletion.', name: 'photos.deletion', error: error, stackTrace: stackTrace);
     }
@@ -611,9 +511,6 @@ class _PhotosHomeState extends State<PhotosHome> {
     setState(() {
       _albums = refreshedAlbums;
       _activeAlbum = refreshedAlbum;
-      _favoriteIds = nextFavoriteIds;
-      _favoritePhotos = refreshedFavorites;
-      _favoritesLoaded = true;
       if (_selectedTab == 0) {
         _photos = refreshedPhotos;
         _page = 0;
@@ -632,57 +529,8 @@ class _PhotosHomeState extends State<PhotosHome> {
         : '${deletedIds.length} deleted. $failedCount could not be deleted.');
   }
 
-  Future<void> _loadFavorites() async {
-    if (_loadingFavorites || _favoritesLoaded) return;
-
-    setState(() => _loadingFavorites = true);
-    try {
-      final matches = await widget.library.findPhotosByIds(_favoriteIds);
-      if (!mounted) return;
-      setState(() {
-        _favoritePhotos = matches;
-        _favoritesLoaded = true;
-        _loadingFavorites = false;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _loadingFavorites = false);
-      _showMessage('Could not load your favorites.');
-    }
-  }
-
-  Future<void> _setFavorite(GalleryPhoto photo, bool isFavorite) async {
-    final nextIds = Set<String>.from(_favoriteIds);
-    if (isFavorite) {
-      nextIds.add(photo.id);
-    } else {
-      nextIds.remove(photo.id);
-    }
-
-    setState(() {
-      _favoriteIds = nextIds;
-      if (_favoritesLoaded) {
-        if (isFavorite) {
-          if (!_favoritePhotos.any((item) => item.id == photo.id)) {
-            _favoritePhotos = [photo, ..._favoritePhotos];
-          }
-        } else {
-          _favoritePhotos =
-              _favoritePhotos.where((item) => item.id != photo.id).toList();
-        }
-      }
-    });
-
-    try {
-      await widget.favoritesStore.save(nextIds);
-    } catch (_) {
-      if (mounted) _showMessage('Could not save favorites on this device.');
-    }
-  }
-
   void _openPhoto(GalleryPhoto photo) {
-    final sourcePhotos = _selectedTab == 2 ? _favoritePhotos : _photos;
-    final photos = List<GalleryPhoto>.from(sourcePhotos);
+    final photos = List<GalleryPhoto>.from(_photos);
     var initialIndex = photos.indexWhere((item) => item.id == photo.id);
     if (initialIndex < 0) {
       photos.add(photo);
@@ -694,8 +542,6 @@ class _PhotosHomeState extends State<PhotosHome> {
         builder: (context) => PhotoViewer(
           photos: photos,
           initialIndex: initialIndex,
-          favoriteIds: Set<String>.from(_favoriteIds),
-          onFavoriteChanged: _setFavorite,
         ),
       ),
     );
@@ -710,7 +556,6 @@ class _PhotosHomeState extends State<PhotosHome> {
 
   String get _title {
     if (_selectedTab == 1) return 'Albums';
-    if (_selectedTab == 2) return 'Favorites';
     if (!_activeAlbum.isAll) return _activeAlbum.name;
     return 'Photos';
   }
@@ -718,9 +563,6 @@ class _PhotosHomeState extends State<PhotosHome> {
   String get _subtitle {
     if (!_hasAccess) return 'Private photo library';
     if (_selectedTab == 1) return '${_albums.length} albums on this device';
-    if (_selectedTab == 2) {
-      return '${_favoriteIds.length} saved favorites';
-    }
     final count = _activeAlbum.count;
     return count == 1 ? '1 photo on this device' : '$count photos on this device';
   }
@@ -815,7 +657,6 @@ class _PhotosHomeState extends State<PhotosHome> {
         destinations: const [
           NavigationDestination(key: Key('photosTab'), icon: Icon(Icons.photo_outlined), selectedIcon: Icon(Icons.photo), label: 'Photos'),
           NavigationDestination(key: Key('albumsTab'), icon: Icon(Icons.folder_outlined), selectedIcon: Icon(Icons.folder), label: 'Albums'),
-          NavigationDestination(key: Key('favoritesTab'), icon: Icon(Icons.favorite_border_rounded), selectedIcon: Icon(Icons.favorite_rounded), label: 'Favorites'),
         ],
       ),
       ),
@@ -855,8 +696,7 @@ class _PhotosHomeState extends State<PhotosHome> {
     }
 
     if (_selectedTab == 1) return _buildAlbums();
-    if (_selectedTab == 2) return _buildFavorites();
-    return _buildPhotoGrid(_photos, favoritesMode: false);
+    return _buildPhotoGrid(_photos);
   }
 
   Widget _buildAlbums() {
@@ -889,46 +729,16 @@ class _PhotosHomeState extends State<PhotosHome> {
     );
   }
 
-  Widget _buildFavorites() {
-    if (_loadingFavorites) {
-      return const Center(
-        child: CircularProgressIndicator(color: Colors.white),
-      );
-    }
-
-    if (_favoriteIds.isEmpty || _favoritePhotos.isEmpty) {
-      return _MessageState(
-        icon: Icons.favorite_border_rounded,
-        title: 'Your favorites live here',
-        message: _favoriteIds.isEmpty
-            ? 'Tap the heart on any photo to save it here.'
-            : 'Some saved photos may have been removed from your device.',
-        actionLabel: 'Back to photos',
-        onAction: () => _selectTab(0),
-      );
-    }
-
-    return _buildPhotoGrid(_favoritePhotos, favoritesMode: true);
-  }
-
-  Widget _buildPhotoGrid(
-    List<GalleryPhoto> photos, {
-    required bool favoritesMode,
-  }) {
+  Widget _buildPhotoGrid(List<GalleryPhoto> photos) {
     if (photos.isEmpty) {
       return _MessageState(
-        icon: favoritesMode
-            ? Icons.favorite_border_rounded
-            : Icons.photo_outlined,
-        title: favoritesMode ? 'No favorites yet' : 'No photos yet',
-        message: favoritesMode
-            ? 'Tap the heart on a photo to keep it close.'
-            : 'Pictures on this device will show up here.',
-        actionLabel: favoritesMode ? 'Back to photos' : 'Refresh library',
-        onAction: favoritesMode ? () => _selectTab(0) : _refresh,
+        icon: Icons.photo_outlined,
+        title: 'No photos yet',
+        message: 'Pictures on this device will show up here.',
+        actionLabel: 'Refresh library',
+        onAction: _refresh,
       );
     }
-
     return NotificationListener<ScrollNotification>(
       onNotification: (notification) {
         if (!_selectionMode && notification is ScrollUpdateNotification &&
@@ -938,10 +748,10 @@ class _PhotosHomeState extends State<PhotosHome> {
         return false;
       },
       child: GridView.builder(
-        key: Key(favoritesMode ? 'favoritesGrid' : 'photosGrid'),
+        key: const Key('photosGrid'),
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(4, 2, 4, 8),
-        itemCount: photos.length + (!favoritesMode && _loadingMore ? 1 : 0),
+        itemCount: photos.length + (_loadingMore ? 1 : 0),
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 3,
           mainAxisSpacing: 4,
@@ -951,21 +761,16 @@ class _PhotosHomeState extends State<PhotosHome> {
         itemBuilder: (context, index) {
           if (index >= photos.length) {
             return const Center(
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: Colors.white,
-              ),
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
             );
           }
           final photo = photos[index];
           return _PhotoTile(
             photo: photo,
-            isFavorite: _favoriteIds.contains(photo.id),
             isSelected: _selectedPhotoIds.contains(photo.id),
             selectionMode: _selectionMode,
             onTap: () => _selectionMode ? _togglePhotoSelection(photo) : _openPhoto(photo),
             onLongPress: () => _beginPhotoSelection(photo),
-            onFavoriteTap: () => _setFavorite(photo, !_favoriteIds.contains(photo.id)),
           );
         },
       ),
@@ -1055,15 +860,18 @@ class _MessageState extends StatelessWidget {
 }
 
 class _PhotoTile extends StatelessWidget {
-  const _PhotoTile({required this.photo, required this.isFavorite, required this.isSelected,
-    required this.selectionMode, required this.onTap, required this.onLongPress, required this.onFavoriteTap});
+  const _PhotoTile({
+    required this.photo,
+    required this.isSelected,
+    required this.selectionMode,
+    required this.onTap,
+    required this.onLongPress,
+  });
   final GalleryPhoto photo;
-  final bool isFavorite;
   final bool isSelected;
   final bool selectionMode;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
-  final VoidCallback onFavoriteTap;
 
   @override
   Widget build(BuildContext context) => ClipRRect(
@@ -1082,14 +890,7 @@ class _PhotoTile extends StatelessWidget {
             Positioned(top: 6, right: 6, child: Container(width: 27, height: 27,
               decoration: BoxDecoration(color: isSelected ? Colors.white : Colors.black.withValues(alpha: 0.45),
                 shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 1.5)),
-              child: isSelected ? const Icon(Icons.check_rounded, color: Colors.black, size: 18) : null))
-          else
-            Positioned(top: 2, right: 2, child: IconButton(
-              key: Key('favorite-${photo.id}'), tooltip: isFavorite ? 'Remove favorite' : 'Add favorite',
-              onPressed: onFavoriteTap, visualDensity: VisualDensity.compact, padding: const EdgeInsets.all(5),
-              constraints: const BoxConstraints.tightFor(width: 34, height: 34),
-              icon: Icon(isFavorite ? Icons.favorite_rounded : Icons.favorite_border_rounded, size: 19,
-                color: Colors.white, shadows: const [Shadow(blurRadius: 8, color: Colors.black)]))),
+              child: isSelected ? const Icon(Icons.check_rounded, color: Colors.black, size: 18) : null)),
           if (photo.createdAt != null)
             Positioned(bottom: 5, left: 6, right: 6, child: Text(_formatDate(photo.createdAt!), maxLines: 1,
               overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, color: Colors.white,
@@ -1179,19 +980,10 @@ class _AlbumTile extends StatelessWidget {
 }
 
 class PhotoViewer extends StatefulWidget {
-  const PhotoViewer({
-    super.key,
-    required this.photos,
-    required this.initialIndex,
-    required this.favoriteIds,
-    required this.onFavoriteChanged,
-  });
+  const PhotoViewer({super.key, required this.photos, required this.initialIndex});
 
   final List<GalleryPhoto> photos;
   final int initialIndex;
-  final Set<String> favoriteIds;
-  final Future<void> Function(GalleryPhoto photo, bool isFavorite)
-      onFavoriteChanged;
 
   @override
   State<PhotoViewer> createState() => _PhotoViewerState();
@@ -1294,7 +1086,9 @@ class _ZoomableImageCanvasState extends State<ZoomableImageCanvas> {
 class _PhotoViewerState extends State<PhotoViewer> {
   late final PageController _pageController;
   late int _currentIndex;
-  late Set<String> _favoriteIds;
+  bool _controlsVisible = false;
+  bool _controlsVisibleAtPointerDown = false;
+  Timer? _hideControlsTimer;
   double _currentScale = 1;
   int _canvasVersion = 0;
 
@@ -1304,50 +1098,91 @@ class _PhotoViewerState extends State<PhotoViewer> {
   bool _multiTouchGesture = false;
 
   GalleryPhoto get _currentPhoto => widget.photos[_currentIndex];
-  bool get _isFavorite => _favoriteIds.contains(_currentPhoto.id);
 
   @override
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex;
     _pageController = PageController(initialPage: _currentIndex);
-    _favoriteIds = Set<String>.from(widget.favoriteIds);
+    _setSystemUiMode(immersive: true);
   }
+
+  static const MethodChannel _systemUiChannel = MethodChannel('photos/system_ui');
 
   @override
   void dispose() {
+    _hideControlsTimer?.cancel();
+    _setSystemUiMode(immersive: false);
     _pageController.dispose();
     super.dispose();
   }
 
-  void _toggleFavorite() {
-    final photo = _currentPhoto;
-    final next = !_favoriteIds.contains(photo.id);
-    setState(() {
-      if (next) {
-        _favoriteIds.add(photo.id);
-      } else {
-        _favoriteIds.remove(photo.id);
-      }
+  void _setSystemUiMode({required bool immersive}) {
+    unawaited(_applySystemUiMode(immersive: immersive));
+  }
+
+  Future<void> _applySystemUiMode({required bool immersive}) async {
+    try {
+      await SystemChrome.setEnabledSystemUIMode(
+        immersive ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge,
+      );
+    } on MissingPluginException {
+      // Some widget-test bindings do not register system UI platform methods.
+    } on PlatformException {
+      // The Android channel remains a fallback for the viewer.
+    }
+    try {
+      await _systemUiChannel.invokeMethod<void>(immersive ? 'immersive' : 'edgeToEdge');
+    } on MissingPluginException {
+      // This Android-only method channel is not registered in widget tests.
+    } on PlatformException {
+      // Keep the viewer usable if the platform implementation fails.
+    }
+  }
+
+  void _showControls() {
+    _hideControlsTimer?.cancel();
+    if (!_controlsVisible) setState(() => _controlsVisible = true);
+    _setSystemUiMode(immersive: false);
+    _hideControlsTimer = Timer(const Duration(milliseconds: 2300), () {
+      if (!mounted) return;
+      setState(() => _controlsVisible = false);
+      _setSystemUiMode(immersive: true);
+      _hideControlsTimer = null;
     });
-    widget.onFavoriteChanged(photo, next);
+  }
+
+  void _handleTap() {
+    if (_controlsVisibleAtPointerDown) {
+      _hideControlsTimer?.cancel();
+      setState(() => _controlsVisible = false);
+      _setSystemUiMode(immersive: true);
+      _hideControlsTimer = null;
+    } else {
+      _showControls();
+    }
   }
 
   void _handlePageChanged(int index) {
+    final changed = index != _currentIndex;
     setState(() {
       _currentIndex = index;
       _currentScale = 1;
       _canvasVersion++;
     });
+    if (changed) _showControls();
   }
 
   void _handleScaleChanged(String photoId, double scale) {
     if (_currentPhoto.id == photoId) {
       _currentScale = scale;
+      if (scale > 1.015) _showControls();
     }
   }
 
   void _handlePointerDown(PointerDownEvent event) {
+    _controlsVisibleAtPointerDown = _controlsVisible;
+    _showControls();
     if (_activePointers.isEmpty) {
       _swipeStart = event.localPosition;
       _swipeStartedAtDefaultScale = _currentScale <= 1.015;
@@ -1418,7 +1253,10 @@ class _PhotoViewerState extends State<PhotoViewer> {
           key: const Key('photoViewerCanvas'),
           fit: StackFit.expand,
           children: [
-            PageView.builder(
+            GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: _handleTap,
+              child: PageView.builder(
               controller: _pageController,
               physics: const NeverScrollableScrollPhysics(),
               itemCount: widget.photos.length,
@@ -1450,49 +1288,38 @@ class _PhotoViewerState extends State<PhotoViewer> {
                 );
               },
             ),
-            SafeArea(
-              child: Align(
-                alignment: Alignment.topCenter,
-                child: Container(
-                  height: 58,
-                  color: Colors.black.withValues(alpha: 0.55),
-                  child: Row(
-                    children: [
-                      IconButton(
-                        key: const Key('viewerBack'),
-                        tooltip: 'Back',
-                        onPressed: () => Navigator.of(context).maybePop(),
-                        icon: const Icon(Icons.arrow_back_rounded),
-                      ),
-                      Expanded(
-                        child: Text(
-                          title,
-                          key: const Key('viewerPhotoTitle'),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            color: Colors.white,
+            ),
+            if (_controlsVisible)
+              SafeArea(
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: Container(
+                    key: const Key('viewerControls'),
+                    height: 58,
+                    color: Colors.black.withValues(alpha: 0.55),
+                    child: Row(
+                      children: [
+                        IconButton(
+                          key: const Key('viewerBack'),
+                          tooltip: 'Back',
+                          onPressed: () => Navigator.of(context).maybePop(),
+                          icon: const Icon(Icons.arrow_back_rounded),
+                        ),
+                        Expanded(
+                          child: Text(
+                            title,
+                            key: const Key('viewerPhotoTitle'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 16, color: Colors.white),
                           ),
                         ),
-                      ),
-                      IconButton(
-                        key: const Key('viewerFavorite'),
-                        onPressed: _toggleFavorite,
-                        tooltip:
-                            _isFavorite ? 'Remove favorite' : 'Add favorite',
-                        icon: Icon(
-                          _isFavorite
-                              ? Icons.favorite_rounded
-                              : Icons.favorite_border_rounded,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                    ],
+                        const SizedBox(width: 6),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
           ],
         ),
       ),

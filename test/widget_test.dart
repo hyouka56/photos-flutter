@@ -5,11 +5,9 @@ import 'package:photos/photo_library.dart';
 
 void main() {
   late FakePhotoLibrary library;
-  late MemoryFavoritesStore favorites;
 
   setUp(() {
     library = FakePhotoLibrary();
-    favorites = MemoryFavoritesStore();
   });
 
   testWidgets('zoom stays focal, returns to default, and double tap resets',
@@ -90,12 +88,13 @@ void main() {
         home: PhotoViewer(
           photos: photos,
           initialIndex: 1,
-          favoriteIds: const <String>{},
-          onFavoriteChanged: (photo, isFavorite) async {},
         ),
       ),
     );
     await tester.pumpAndSettle();
+    expect(find.byKey(const Key('viewerPhotoTitle')), findsNothing);
+    await tester.tapAt(const Offset(400, 300));
+    await tester.pump();
     expect(find.text('2025-01-02'), findsOneWidget);
 
     await tester.dragFrom(const Offset(420, 300), const Offset(-240, 0));
@@ -110,7 +109,7 @@ void main() {
   testWidgets('asks for photo access and retries after access is granted', (tester) async {
     library.accessGranted = false;
     await tester.pumpWidget(
-      PhotosApp(library: library, favoritesStore: favorites),
+      PhotosApp(library: library),
     );
     await tester.pumpAndSettle();
 
@@ -127,7 +126,7 @@ void main() {
 
   testWidgets('shows the local photo grid and bottom navigation', (tester) async {
     await tester.pumpWidget(
-      PhotosApp(library: library, favoritesStore: favorites),
+      PhotosApp(library: library),
     );
     await tester.pumpAndSettle();
 
@@ -137,31 +136,40 @@ void main() {
     expect(find.byKey(const Key('photoTile-photo-1')), findsOneWidget);
     expect(find.byKey(const Key('photoTile-photo-2')), findsOneWidget);
     expect(find.byKey(const Key('albumsTab')), findsOneWidget);
-    expect(find.byKey(const Key('favoritesTab')), findsOneWidget);
+    expect(find.byType(NavigationDestination), findsNWidgets(2));
     expect(library.requestCount, 1);
   });
 
-  testWidgets('favorites are saved and displayed in the favorites tab', (tester) async {
+  testWidgets('photo viewer controls toggle and auto-hide after inactivity',
+      (tester) async {
+    final photos = <GalleryPhoto>[
+      GalleryPhoto(id: 'controls-1', asset: null, createdAt: DateTime(2025, 2, 1)),
+    ];
     await tester.pumpWidget(
-      PhotosApp(library: library, favoritesStore: favorites),
+      MaterialApp(home: PhotoViewer(photos: photos, initialIndex: 0)),
     );
     await tester.pumpAndSettle();
+    expect(find.byKey(const Key('viewerControls')), findsNothing);
+    expect(find.byKey(const Key('viewerPhotoTitle')), findsNothing);
 
-    await tester.tap(find.byKey(const Key('favorite-photo-1')));
-    await tester.pumpAndSettle();
+    await tester.tapAt(const Offset(400, 300));
+    await tester.pump();
+    expect(find.byKey(const Key('viewerControls')), findsOneWidget);
+    expect(find.text('2025-02-01'), findsOneWidget);
 
-    expect(favorites.ids, contains('photo-1'));
-
-    await tester.tap(find.byKey(const Key('favoritesTab')));
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(const Key('favoritesGrid')), findsOneWidget);
-    expect(find.byKey(const Key('photoTile-photo-1')), findsOneWidget);
-    expect(find.byKey(const Key('photoTile-photo-2')), findsNothing);
+    await tester.tapAt(const Offset(400, 300));
+    await tester.pump();
+    expect(find.byKey(const Key('viewerControls')), findsNothing);
+    await tester.tapAt(const Offset(400, 300));
+    await tester.pump();
+    expect(find.byKey(const Key('viewerControls')), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 2301));
+    expect(find.byKey(const Key('viewerControls')), findsNothing);
+    expect(find.byKey(const Key('viewerPhotoTitle')), findsNothing);
   });
 
   testWidgets('albums have a readable count and system back returns to albums', (tester) async {
-    await tester.pumpWidget(PhotosApp(library: library, favoritesStore: favorites));
+    await tester.pumpWidget(PhotosApp(library: library));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('albumsTab')));
     await tester.pumpAndSettle();
@@ -176,7 +184,7 @@ void main() {
   });
 
   testWidgets('long press selects all and deletes photos permanently', (tester) async {
-    await tester.pumpWidget(PhotosApp(library: library, favoritesStore: favorites));
+    await tester.pumpWidget(PhotosApp(library: library));
     await tester.pumpAndSettle();
     await tester.longPress(find.byKey(const Key('photoTile-photo-1')));
     await tester.pumpAndSettle();
@@ -189,38 +197,10 @@ void main() {
     await tester.tap(find.byKey(const Key('confirmDeletePhotosButton')));
     await tester.pumpAndSettle();
     expect(library.deletedIds, containsAll(<String>['photo-1', 'photo-2']));
-    expect(favorites.ids, isEmpty);
     expect(find.byKey(const Key('photoTile-photo-1')), findsNothing);
   });
 
-  testWidgets('deleting a favorite also deletes it from the device library', (tester) async {
-    await tester.pumpWidget(PhotosApp(library: library, favoritesStore: favorites));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('favorite-photo-1')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('favoritesTab')));
-    await tester.pumpAndSettle();
-    await tester.longPress(find.byKey(const Key('photoTile-photo-1')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('deleteSelectedPhotosButton')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('confirmDeletePhotosButton')));
-    await tester.pumpAndSettle();
-    expect(library.deletedIds, contains('photo-1'));
-    expect(favorites.ids, isEmpty);
-  });
-}
 
-class MemoryFavoritesStore implements FavoritesStore {
-  Set<String> ids = <String>{};
-
-  @override
-  Future<Set<String>> load() async => Set<String>.from(ids);
-
-  @override
-  Future<void> save(Set<String> value) async {
-    ids = Set<String>.from(value);
-  }
 }
 
 class FakePhotoLibrary implements PhotoLibrary {
@@ -297,8 +277,5 @@ class FakePhotoLibrary implements PhotoLibrary {
     return found;
   }
 
-  @override
-  Future<List<GalleryPhoto>> findPhotosByIds(Set<String> ids) async {
-    return _photos.where((photo) => ids.contains(photo.id)).toList();
-  }
+
 }
