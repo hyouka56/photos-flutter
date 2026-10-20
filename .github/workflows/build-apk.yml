@@ -39,6 +39,9 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
+      - name: Avoid Flutter 3.47 false-positive for photo_manager built-in Kotlin
+        run: python3 tool/patch_photo_manager_kgp_warning.py
+
       # Keep the exact resolved versions available briefly for dependency security audits.
       - name: Upload resolved Pub lockfile for audits
         uses: actions/upload-artifact@v6
